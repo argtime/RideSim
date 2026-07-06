@@ -1880,7 +1880,7 @@ const RIDE_SPIN = {
   astro_orbiter:        { dir: 1,  seg: 0 },
   mission_space:        { dir: 1,  seg: 0, loops: 8 },   // centrifuge — spins faster than carousel/dumbo (5)
   carousel_of_progress: { dir: -1, seg: 6, rPxOverride: 24, rPxMobile: 10 },
-  teacups:              { type: "epi", dir: 1, revs: 5, spins: 6 }
+  teacups:              { type: "epi", dir: -1, revs: 5, spins: 6 }
 };
 
 // Avatar carries a persistent size through the animation: each restaurant visit
