@@ -1083,6 +1083,9 @@ function draw(marker) {
     if ((liveShow || ll) && inSeq >= 0) drawSeqBadge(X, Y, radius, inSeq + 1);  // keep order visible
     ctx.globalAlpha = 1;
     if (ll) drawLLBadge(X, Y, radius);            // ⚡ bolt at the bottom of LL rides
+    // sun/shade ring for rides that carry queue-exposure info
+    if (cat === "ride" && !attrClosed(a) && (typeof a.qSun === "number" || a.qInside != null))
+      drawQueueSunArc(X, Y, radius, qSunFrac(a));
   });
   if (hoverAttr) {
     const a = state.attractions.get(hoverAttr);
@@ -1131,6 +1134,20 @@ function drawSadFace(cx, cy, r, color) {
   ctx.beginPath();                                          // frown: top arc of a circle below the mouth
   ctx.arc(cx, cy + r * 0.95, r * 0.6, Math.PI * 1.25, Math.PI * 1.75);
   ctx.stroke();
+  ctx.restore();
+}
+// Sun/shade ring just outside a ride circle: a yellow arc for the outdoor part
+// of the queue (starting at 12 o'clock, sweeping clockwise) then a light-blue arc
+// for the shaded part. sunFrac 0..1 is the portion in the sun.
+function drawQueueSunArc(cx, cy, r, sunFrac) {
+  const lw = Math.max(2.5, r * 0.30);          // thick enough to read, not chunky
+  const ringR = r + 2 + lw / 2;                // sit just outside the circumference
+  const top = -Math.PI / 2, TAU = Math.PI * 2;
+  const sunEnd = top + sunFrac * TAU;
+  ctx.save();
+  ctx.lineWidth = lw; ctx.lineCap = "butt";
+  if (sunFrac > 0) { ctx.beginPath(); ctx.strokeStyle = "#ffcc4d"; ctx.arc(cx, cy, ringR, top, sunEnd); ctx.stroke(); }
+  if (sunFrac < 1) { ctx.beginPath(); ctx.strokeStyle = "#a9def0"; ctx.arc(cx, cy, ringR, sunEnd, top + TAU); ctx.stroke(); }
   ctx.restore();
 }
 function drawPath(coords, color, lw, bright) {
