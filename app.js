@@ -1077,8 +1077,14 @@ function draw(marker) {
     if (closedFace) {
       drawSadFace(X, Y, radius, "#fff");
     } else if (inside) {
-      ctx.fillStyle = insideColor; ctx.font = "bold " + sz.font + "px sans-serif";
+      ctx.fillStyle = insideColor;
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      // shrink wide labels (e.g. an LL return time like "9.35a") to stay clear of
+      // the circle's stroke instead of overlapping it
+      let fpx = sz.font;
+      ctx.font = "bold " + fpx + "px sans-serif";
+      const avail = radius * 2 - 6, w = ctx.measureText(inside).width;
+      if (w > avail) { fpx = Math.max(6, fpx * avail / w); ctx.font = "bold " + fpx + "px sans-serif"; }
       ctx.fillText(inside, X, Y);
     }
     if ((liveShow || ll) && inSeq >= 0) drawSeqBadge(X, Y, radius, inSeq + 1);  // keep order visible
