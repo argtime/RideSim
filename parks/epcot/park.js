@@ -792,6 +792,13 @@ SAMPLE.geoAnchors = [
 ];
 // @RIDESIM:GEO:END
 
+// Shelter polygons from the RainCover / indoors / shade layers, each as
+// { points:[{x,y}...], cover?, indoor?, shade? }. Feeds the Heat overlay.
+// @RIDESIM:SHELTERS:START
+SAMPLE.shelters = [
+];
+// @RIDESIM:SHELTERS:END
+
 // Wait times TSV — hourly points, code interpolates between them.
 SAMPLE.waitsTSV = (function () {
   const profile = {

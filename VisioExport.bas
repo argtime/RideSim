@@ -426,15 +426,20 @@ Public Sub ExportRideSim()
     Dim geoCount As Long: geoCount = 0
     Dim geoJson As String: geoJson = BuildGeoJson(pg, geoCount)
 
+    ' --- shelter pass: polygons on the RainCover / indoors / shade layers ------
+    Dim shelterCount As Long: shelterCount = 0
+    Dim sheltersJson As String: sheltersJson = BuildSheltersJson(pg, shelterCount)
+
     ' --- assemble blocks -----------------------------------------------------
     Dim nodesBlock As String, connBlock As String, attrBlock As String
-    Dim mapBlock As String, scaleBlock As String, transportBlock As String, geoBlock As String
+    Dim mapBlock As String, scaleBlock As String, transportBlock As String, geoBlock As String, sheltersBlock As String
     nodesBlock = "SAMPLE.nodes = [" & vbCrLf & nodesJson & vbCrLf & "];"
     connBlock = "SAMPLE.connections = [" & vbCrLf & connJson & vbCrLf & "];"
     attrBlock = "SAMPLE.attractions = [" & vbCrLf & attrJson & vbCrLf & "];"
     mapBlock = "SAMPLE.mapExtent = " & MapExtentJson(pg) & ";"
     transportBlock = "SAMPLE.transport = [" & vbCrLf & transportJson & vbCrLf & "];"
     geoBlock = "SAMPLE.geoAnchors = [" & vbCrLf & geoJson & vbCrLf & "];"
+    sheltersBlock = "SAMPLE.shelters = [" & vbCrLf & sheltersJson & vbCrLf & "];"
 
     Dim ftPerPx As Double: ftPerPx = ComputeScale(pg)
     If ftPerPx > 0 Then
@@ -446,7 +451,7 @@ Public Sub ExportRideSim()
     Dim outText As String   ' plain-text fallback (same blocks, copy/paste-able)
     outText = nodesBlock & vbCrLf & vbCrLf & connBlock & vbCrLf & vbCrLf & _
               attrBlock & vbCrLf & vbCrLf & mapBlock & vbCrLf & vbCrLf & scaleBlock & vbCrLf & vbCrLf & _
-              transportBlock & vbCrLf & vbCrLf & geoBlock & vbCrLf
+              transportBlock & vbCrLf & vbCrLf & geoBlock & vbCrLf & vbCrLf & sheltersBlock & vbCrLf
     Debug.Print outText
 
     ' --- emit: patch the park's park.js in place, else write the .txt --------
@@ -454,11 +459,11 @@ Public Sub ExportRideSim()
     Dim msg As String, htmlP As String, didPatch As Boolean
     htmlP = HtmlPath()
     If htmlP <> "" Then
-        If Dir$(htmlP) <> "" Then didPatch = PatchHtml(htmlP, nodesBlock, connBlock, attrBlock, mapBlock, scaleBlock, transportBlock, geoBlock)
+        If Dir$(htmlP) <> "" Then didPatch = PatchHtml(htmlP, nodesBlock, connBlock, attrBlock, mapBlock, scaleBlock, transportBlock, geoBlock, sheltersBlock)
     End If
     If didPatch Then
         msg = "Wrote " & nodeCount & " nodes, " & connCount & " connections, " & _
-              attrCount & " attractions" & IIf(transitCount > 0, ", " & transitCount & " transport line(s)", "") & IIf(geoCount > 0, ", " & geoCount & " geo anchor(s)", "") & " into:" & vbCrLf & htmlP & vbCrLf & _
+              attrCount & " attractions" & IIf(transitCount > 0, ", " & transitCount & " transport line(s)", "") & IIf(geoCount > 0, ", " & geoCount & " geo anchor(s)", "") & IIf(shelterCount > 0, ", " & shelterCount & " shelter polygon(s)", "") & " into:" & vbCrLf & htmlP & vbCrLf & _
               "Refresh the page in your browser."
     Else
         Dim savedTo As String: savedTo = WriteOut(outText)
@@ -513,7 +518,7 @@ End Function
 ' leaves the file untouched) if any marker is missing.
 Private Function PatchHtml(path As String, nodesBlock As String, connBlock As String, _
                            attrBlock As String, mapBlock As String, scaleBlock As String, _
-                           transportBlock As String, geoBlock As String) As Boolean
+                           transportBlock As String, geoBlock As String, sheltersBlock As String) As Boolean
     On Error GoTo fail
     Dim s As String: s = ReadTextUtf8(path)
     Dim nl As String: nl = IIf(InStr(s, vbCrLf) > 0, vbCrLf, vbLf)
@@ -529,6 +534,9 @@ Private Function PatchHtml(path As String, nodesBlock As String, connBlock As St
     End If
     If InStr(s, "@RIDESIM:GEO:START") > 0 Then
         s = PatchSection(s, "@RIDESIM:GEO:START", "@RIDESIM:GEO:END", Reflow(geoBlock, nl), nl, ok)
+    End If
+    If InStr(s, "@RIDESIM:SHELTERS:START") > 0 Then
+        s = PatchSection(s, "@RIDESIM:SHELTERS:START", "@RIDESIM:SHELTERS:END", Reflow(sheltersBlock, nl), nl, ok)
     End If
     If ok Then WriteTextUtf8NoBom path, s   ' only touch the file if every marker matched
     PatchHtml = ok
@@ -795,6 +803,60 @@ Private Function BuildGeoJson(pg As Visio.Page, ByRef cnt As Long) As String
         End If
     Next shp
     BuildGeoJson = out
+End Function
+
+' Build SAMPLE.shelters from polygons on the RainCover / indoors / shade layers.
+' A shape can be on more than one layer, so each emits the flags it carries:
+'   cover  (RainCover) -> keeps rain off,  indoor (indoors) -> a building you can
+'   duck into,  shade (shade) -> shaded but maybe not covered.
+Private Function BuildSheltersJson(pg As Visio.Page, ByRef cnt As Long) As String
+    cnt = 0
+    Dim out As String, shp As Visio.Shape
+    For Each shp In pg.Shapes
+        Dim cover As Boolean, indoor As Boolean, shade As Boolean
+        cover = OnLayer(shp, "RainCover")
+        indoor = OnLayer(shp, "indoors")
+        shade = OnLayer(shp, "shade")
+        If cover Or indoor Or shade Then
+            Dim pj As String: pj = PolygonPointsJson(shp)
+            If pj <> "" Then
+                If cnt > 0 Then out = out & "," & vbCrLf
+                out = out & "  { ""points"": [" & pj & "]"
+                If cover Then out = out & ", ""cover"": true"
+                If indoor Then out = out & ", ""indoor"": true"
+                If shade Then out = out & ", ""shade"": true"
+                out = out & " }"
+                cnt = cnt + 1
+            End If
+        End If
+    Next shp
+    BuildSheltersJson = out
+End Function
+
+' A shape's outline as JSON point objects (inner list, no brackets), in page px.
+' Empty when it has fewer than 3 vertices (not a usable polygon).
+Private Function PolygonPointsJson(shp As Visio.Shape) As String
+    Dim pts As Collection: Set pts = New Collection
+    On Error Resume Next
+    Dim i As Long, r As Long, xl As Double, yl As Double
+    For i = 1 To shp.GeometryCount
+        r = 1
+        Do While shp.CellExistsU("Geometry" & i & ".X" & r, 0)
+            xl = shp.CellsU("Geometry" & i & ".X" & r).ResultIU
+            yl = shp.CellsU("Geometry" & i & ".Y" & r).ResultIU
+            pts.Add LocalToPagePx(shp, xl, yl)
+            r = r + 1
+        Loop
+    Next i
+    On Error GoTo 0
+    If pts.Count < 3 Then Exit Function
+    Dim s As String, kk As Long, pv As Variant
+    For kk = 1 To pts.Count
+        pv = pts(kk)
+        If kk > 1 Then s = s & ", "
+        s = s & "{ ""x"": " & CLng(pv(0)) & ", ""y"": " & CLng(pv(1)) & " }"
+    Next kk
+    PolygonPointsJson = s
 End Function
 
 ' "lat,lon" from Shape Data. Tries the internal name first, then the visible

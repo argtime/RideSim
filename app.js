@@ -189,6 +189,9 @@ function buildFromData(nodes, connections, attractions, waitsTSV, transport) {
   state.transport = Array.isArray(transport) ? transport : [];
   buildTransitEdges(state.transport);
 
+  // shelter polygons (shade / rain cover / indoor) from the park's layers
+  state.shelters = Array.isArray(SAMPLE.shelters) ? SAMPLE.shelters : [];
+
   state.attractions = new Map();
   attractions.forEach(a => state.attractions.set(a.id, a));
 
@@ -938,6 +941,8 @@ function draw(marker) {
     }
   }
 
+  drawShelters();   // shade / rain-cover overlay (part of the Heat layer), above the map
+
   // connections (part of the graph — hidden when graph is toggled off)
   if (showGraph) {
     ctx.lineWidth = 2; ctx.strokeStyle = "#2b3a57";
@@ -1141,6 +1146,25 @@ function drawSadFace(cx, cy, r, color) {
   ctx.beginPath();                                          // frown: top arc of a circle below the mouth
   ctx.arc(cx, cy + r * 0.95, r * 0.6, Math.PI * 1.25, Math.PI * 1.75);
   ctx.stroke();
+  ctx.restore();
+}
+// Shelter overlay, drawn as part of the Heat layer: translucent polygons for
+// shaded areas (soft green, ~20% so the map still reads through). Rain-cover and
+// indoor polygons come later, with the rain features.
+const SHADE_FILL = "#3e8e5a";
+function drawShelters() {
+  if (!showHeat || !state.shelters || !state.shelters.length) return;
+  ctx.save();
+  ctx.globalAlpha = 0.2;
+  ctx.fillStyle = SHADE_FILL;
+  state.shelters.forEach(s => {
+    const pts = s.points;
+    if (!s.shade || !pts || pts.length < 3) return;
+    ctx.beginPath();
+    pts.forEach((p, i) => { i ? ctx.lineTo(tx(p.x), ty(p.y)) : ctx.moveTo(tx(p.x), ty(p.y)); });
+    ctx.closePath();
+    ctx.fill();
+  });
   ctx.restore();
 }
 // Sun/shade ring just outside a ride circle: a yellow arc for the outdoor part
