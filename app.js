@@ -76,6 +76,19 @@ function parseTransitToken(s) {
   return gt >= 0 ? { lineId: rest.slice(0, gt), alight: rest.slice(gt + 1) } : { lineId: rest, alight: null };
 }
 function transitTokenFor(lineId, alight) { return TRANSIT_TOKEN + lineId + (alight ? ">" + alight : ""); }
+// A sequence entry is "id" or "id*N" — the *N is a PER-OCCURRENCE override
+// (wait minutes for a ride, dwell minutes for a non-ride), so the same ride can
+// be ridden twice with different waits. Transit tokens are left whole.
+function entryId(e) { return isTransitToken(e) ? e : String(e).split("*")[0]; }
+function entryOverride(e) {
+  if (isTransitToken(e)) return null;
+  const i = String(e).indexOf("*");
+  if (i < 0) return null;
+  const n = parseInt(String(e).slice(i + 1), 10);
+  return (isFinite(n) && n >= 0) ? n : null;
+}
+function makeEntry(id, n) { return (typeof n === "number" && n >= 0) ? id + "*" + n : id; }
+function seqIndexOf(id) { return state.sequence.findIndex(e => entryId(e) === id); }
 function catMeta(c) { return CAT_META[c] || CAT_META.ride; }
 // Which categories are shown in the picker / on the map (toggled by the chips).
 const catFilter = { ride: true, restaurant: true, shop: true, pin: true, restroom: true, other: true, transit: true };
@@ -409,16 +422,15 @@ function parkNowMin() {
 }
 const LIVE_WAIT_WINDOW = 45;   // live standby only trusted for arrivals within this many min of now
 
-// Wait (minutes) used when computing sequence times. Priority:
-//   1. user override (waitOverride text field)
-//   2. live standby wait — but only for arrivals near the present; the live
+// Wait (minutes) used when computing sequence times (no per-occurrence override
+// here — that's applied in computeSequence). Priority:
+//   1. live standby wait — but only for arrivals near the present; the live
 //      number is "right now", so a later arrival falls through to the forecast
-//   3. time-of-day forecast / matrix (themeparks.wiki hourly forecast, or TSV)
-//   4. the ride's configured average (avgWait from Visio shape data)
+//   2. time-of-day forecast / matrix (themeparks.wiki hourly forecast, or TSV)
+//   3. the ride's configured average (avgWait from Visio shape data)
 // Only rides queue; everything else is 0.
 function waitFor(a, arrivalMin) {
   if (!a || attrCat(a) !== "ride") return 0;
-  if (typeof a.waitOverride === "number" && a.waitOverride >= 0) return a.waitOverride;  // user override wins
   if (showLiveWaits) {
     const live = liveWaitFor(a);
     if (live && live.open && typeof live.wait === "number") {
@@ -618,7 +630,7 @@ function nextDestinationNode(seqIndex) {
   for (let j = seqIndex + 1; j < state.sequence.length; j++) {
     const id = state.sequence[j];
     if (isTransitToken(id)) continue;
-    const a = state.attractions.get(id);
+    const a = state.attractions.get(entryId(id));
     if (!a) continue;
     if (a.entranceNodeId && state.nodes.has(a.entranceNodeId)) return a.entranceNodeId;
     const acc = (Array.isArray(a.accessNodeIds) ? a.accessNodeIds : []).filter(x => state.nodes.has(x));
@@ -690,8 +702,9 @@ function computeSequence() {
       if (tstep) { steps.push(tstep); curTime = tstep.rideEnd; curNode = tstep.exitNodeId; }
       continue;
     }
-    const a = state.attractions.get(attrId);
+    const a = state.attractions.get(entryId(attrId));
     if (!a) continue;
+    const occWait = entryOverride(attrId);   // this occurrence's override (wait/dwell)
     // transit boarding waits change through the day — weight the lines for the
     // moment this leg departs before routing (a close enough proxy for the
     // moment we'd reach the boarding stop).
@@ -723,14 +736,14 @@ function computeSequence() {
 
     const walkStart = curTime, walkEnd = walkStart + travel;
     const category = attrCat(a);
-    // live wait > configured average > time-of-day; non-rides are 0
-    const wait = waitFor(a, walkEnd);
+    // per-occurrence override wins; else live wait (rides) / authored dwell (rest)
+    const wait = (category === "ride" && occWait != null) ? occWait : waitFor(a, walkEnd);
     const waitStart = walkEnd, waitEnd = waitStart + wait;
-    const ride = attrDuration(a);
+    const ride = (category !== "ride" && occWait != null) ? occWait : attrDuration(a);
     const rideStart = waitEnd, rideEnd = rideStart + ride;
 
     steps.push({
-      attractionId: attrId, name: a.name, category,
+      attractionId: entryId(attrId), name: a.name, category,
       pathIds, routeCoords,
       reachable, distPx, walk: travel, walkOnly, transitRide, transitBoard, transitLegs: leg.transitLegs, transitSpans: leg.transitSpans, travelLegs: leg.travelLegs,
       wait, ride,
@@ -976,7 +989,7 @@ function draw(marker) {
     ? state.steps[activeStepIndex].attractionId : null;
   state.attractions.forEach(a => {
     if (!Array.isArray(a.track) || a.track.length < 2) return;
-    if (playing && state.sequence.indexOf(a.id) < 0) return;   // focus on the plan while animating
+    if (playing && seqIndexOf(a.id) < 0) return;   // focus on the plan while animating
     const bright = a.id === activeTrackId && playing;
     drawPath(a.track, bright ? "rgba(157,123,255,0.9)" : "rgba(157,123,255,0.25)", bright ? 2.1 : 1.4, false);
   });
@@ -1011,7 +1024,7 @@ function draw(marker) {
   // attractions (names shown on hover only — see drawAttrLabel)
   const sz = attrSize();
   state.attractions.forEach(a => {
-    const inSeq = state.sequence.indexOf(a.id);
+    const inSeq = seqIndexOf(a.id);
     const cat = attrCat(a);
     // hide a filtered-out category, but always keep sequenced ones visible
     if (!catFilter[cat] && inSeq < 0) return;
@@ -1136,7 +1149,7 @@ function drawAttrLabel(a) {
   if (extra) extra.split(/\r?\n/).forEach(para =>
     wrapText(para, subFont, maxW).forEach(l => lines.push({ t: l, font: subFont, color: "#b9c4d6" })));
   // actionable hint — tapping/clicking the label adds it to the sequence
-  const inSeq = state.sequence.indexOf(a.id) >= 0;
+  const inSeq = seqIndexOf(a.id) >= 0;
   lines.push({ t: inSeq ? "✓ in plan — tap to add again" : "＋ tap to add to plan", font: subFont, color: inSeq ? "#7bd88f" : "#9fd0ff" });
 
   const padX = 8, padY = 6, lineH = 15;
@@ -1441,7 +1454,7 @@ function lastLocation() {
     if (ex && state.nodes.has(ex)) return ex;
   }
   if (state.sequence.length) {
-    const last = state.attractions.get(state.sequence[state.sequence.length - 1]);
+    const last = state.attractions.get(entryId(state.sequence[state.sequence.length - 1]));
     if (last && last.exitNodeId && state.nodes.has(last.exitNodeId)) return last.exitNodeId;
   }
   return startNode();
@@ -1485,19 +1498,22 @@ function renderSeq() {
       el.appendChild(div);
       return;
     }
-    const a = state.attractions.get(id);
+    const a = state.attractions.get(entryId(id));
+    const ov = entryOverride(id);                          // this occurrence's override
     const div = document.createElement("div");
     div.className = "seq-item"; div.draggable = true; div.dataset.idx = i;
     const cat = a ? attrCat(a) : "ride";
-    // editable field: dwell time for shops/restaurants/restrooms/pins/other, wait for rides
+    // editable field: dwell time for shops/restaurants/restrooms/pins/other, wait for rides.
+    // The value is PER-OCCURRENCE (stored on the sequence entry as "id*N").
     let fieldHtml = "";
     if (a && (cat === "restaurant" || cat === "shop" || cat === "restroom" || cat === "other" || cat === "pin")) {
-      fieldHtml = '<input class="dur" data-kind="dur" type="number" min="0" step="5" inputmode="numeric" value="' + attrDuration(a) + '" title="Minutes you\'ll spend here"><span class="durunit">min</span>';
+      const d = (ov != null) ? ov : attrDuration(a);
+      fieldHtml = '<input class="dur" data-kind="dur" type="number" min="0" step="5" inputmode="numeric" value="' + d + '" title="Minutes you\'ll spend here (this stop only)"><span class="durunit">min</span>';
     } else if (a && cat === "ride") {
-      const step = (state.steps[i] && state.steps[i].attractionId === id) ? state.steps[i] : null;
-      const w = (typeof a.waitOverride === "number") ? a.waitOverride : (step ? Math.round(step.wait) : 0);
-      const ovr = (typeof a.waitOverride === "number") ? " ovr" : "";
-      fieldHtml = '<input class="dur wait' + ovr + '" data-kind="wait" type="number" min="0" step="5" inputmode="numeric" value="' + w + '" title="Wait minutes — overrides live/avg; clear to reset"><span class="durunit">wait</span>';
+      const step = state.steps[i];
+      const w = (ov != null) ? ov : (step ? Math.round(step.wait) : 0);
+      const ovr = (ov != null) ? " ovr" : "";
+      fieldHtml = '<input class="dur wait' + ovr + '" data-kind="wait" type="number" min="0" step="5" inputmode="numeric" value="' + w + '" title="Wait minutes for this ride (this stop only) — overrides live/avg; clear to reset"><span class="durunit">wait</span>';
     }
     div.innerHTML = '<span class="idx" title="Tap to change position">' + (i + 1) + '</span><span class="nm">' +
       esc(a ? a.name : id) + '</span>' + fieldHtml + '<span class="rm" title="Remove">&#10005;</span>';
@@ -1509,15 +1525,11 @@ function renderSeq() {
       durEl.draggable = false;
       durEl.onpointerdown = (e) => e.stopPropagation();   // don't start a drag from the field
       durEl.onclick = (e) => e.stopPropagation();
-      durEl.onchange = () => {                              // commit on blur/Enter, then recompute
+      durEl.onchange = () => {                              // set this occurrence's override
         const raw = durEl.value.trim();
-        if (durEl.dataset.kind === "wait") {
-          if (raw === "") delete a.waitOverride;            // blank clears the override
-          else { let v = parseInt(raw, 10); a.waitOverride = (isNaN(v) || v < 0) ? 0 : v; }
-        } else {
-          let v = parseInt(raw, 10);
-          a.rideDuration = (isNaN(v) || v < 0) ? 0 : v;
-        }
+        const base = entryId(id);
+        if (raw === "" && durEl.dataset.kind === "wait") { state.sequence[i] = base; }  // blank clears -> live/avg
+        else { let v = parseInt(raw, 10); state.sequence[i] = makeEntry(base, (isNaN(v) || v < 0) ? 0 : v); }
         refresh();
       };
     }
@@ -1572,8 +1584,8 @@ function moveSelection(delta) {
 function moveSeqItem(i) {
   const n = state.sequence.length;
   const seqId = state.sequence[i];
-  const a = state.attractions.get(seqId);
-  let label = a ? a.name : seqId;
+  const a = state.attractions.get(entryId(seqId));
+  let label = a ? a.name : entryId(seqId);
   if (isTransitToken(seqId)) { const l = (state.transport || []).find(x => x.id === parseTransitToken(seqId).lineId); label = l ? (l.name || l.id) : seqId; }
   const ans = prompt('Move "' + label + '" to position (1–' + n + '):', String(i + 1));
   if (ans == null) return;
@@ -2186,16 +2198,17 @@ function planText() {
       const nm = line ? (line.name || line.id) : p.lineId;
       return "🚂 " + nm + (p.alight ? " → " + stopName(p.alight) : "");
     }
-    const a = state.attractions.get(id);
-    if (!a) return id;
-    // append the user-relevant time as a trailing " - <n>m" (end-anchored so it
+    const a = state.attractions.get(entryId(id));
+    if (!a) return entryId(id);
+    // append the per-occurrence time as a trailing " - <n>m" (end-anchored so it
     // never collides with a " - " inside a name): rides emit only an explicit
-    // wait override; dwell stops emit their dwell minutes.
+    // wait override; dwell stops emit their (per-occurrence or authored) minutes.
+    const ov = entryOverride(id);
     let line = a.name;
     if (attrCat(a) === "ride") {
-      if (typeof a.waitOverride === "number") line += " - " + a.waitOverride + "m";
+      if (ov != null) line += " - " + ov + "m";
     } else {
-      const d = attrDuration(a);
+      const d = (ov != null) ? ov : attrDuration(a);
       if (d > 0) line += " - " + d + "m";
     }
     return line;
@@ -2257,14 +2270,7 @@ function parsePlan(text) {
       return;
     }
     const aid = matchAttr(head) || matchAttr(body);
-    if (aid) {
-      seq.push(aid);
-      if (mins != null) {              // apply the entered time to the matched stop
-        const a = state.attractions.get(aid);
-        if (attrCat(a) === "ride") a.waitOverride = mins; else a.rideDuration = mins;
-      }
-      return;
-    }
+    if (aid) { seq.push(makeEntry(aid, mins)); return; }   // per-occurrence time on the entry
     if (tline) { seq.push(transitTokenFor(tline.id, null)); return; }   // bare line name
     unmatched.push(line);
   });
@@ -2288,18 +2294,9 @@ function applyPlan() {
 // @transit:railroad>fantasyland_station". A leading "s" tags the start; "*N"
 // carries a stop's entered time (ride wait override / dwell minutes).
 function planToParam() {
+  // sequence entries already carry their per-occurrence "*N"; just prefix start.
   const startMin = hmToMin(document.getElementById("startTime").value || "09:00");
-  const parts = ["s" + minToHM(startMin).replace(":", "")];
-  state.sequence.forEach(id => {
-    if (isTransitToken(id)) { parts.push(id); return; }
-    const a = state.attractions.get(id);
-    if (!a) { parts.push(id); return; }
-    let tok = id;
-    if (attrCat(a) === "ride") { if (typeof a.waitOverride === "number") tok += "*" + a.waitOverride; }
-    else { const d = attrDuration(a); if (d > 0) tok += "*" + d; }
-    parts.push(tok);
-  });
-  return parts.join(",");
+  return ["s" + minToHM(startMin).replace(":", "")].concat(state.sequence).join(",");
 }
 function planLink() {
   const u = new URL(location.href);
@@ -2358,11 +2355,8 @@ function loadPlanParam() {
     const star = p.indexOf("*");
     const id = star >= 0 ? p.slice(0, star) : p;
     if (!state.attractions.has(id)) continue;
-    seq.push(id);
-    if (star >= 0) {
-      const mins = parseInt(p.slice(star + 1), 10);
-      if (isFinite(mins)) { const a = state.attractions.get(id); if (attrCat(a) === "ride") a.waitOverride = mins; else a.rideDuration = mins; }
-    }
+    const mins = star >= 0 ? parseInt(p.slice(star + 1), 10) : null;   // per-occurrence override
+    seq.push(makeEntry(id, (mins != null && isFinite(mins)) ? mins : undefined));
   }
   state.sequence = seq;
   return true;
@@ -2614,7 +2608,7 @@ function attractionAt(ev) {
   const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
   let best = null, bestD = 12;
   state.attractions.forEach(a => {
-    if (!catFilter[attrCat(a)] && state.sequence.indexOf(a.id) < 0) return;
+    if (!catFilter[attrCat(a)] && seqIndexOf(a.id) < 0) return;
     const loc = a.displayLocation || state.nodes.get(a.entranceNodeId);
     if (!loc) return;
     const d = Math.hypot(tx(loc.x) - sx, ty(loc.y) - sy);
