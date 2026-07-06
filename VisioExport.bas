@@ -1486,12 +1486,11 @@ End Function
 
 ' True when the shape's "Closed" shape data is set (not open at the park today).
 ' Accepts Visio Boolean cells (TRUE/FALSE) as well as text/numeric truthy values.
+' Long-term closure flag. Look up Prop.Closed by internal name AND visible label,
+' since a Shape Data field added in the UI usually lands in an auto-named row
+' (Prop.Row_1) whose label — not its internal name — is "Closed".
 Private Function IsClosed(shp As Visio.Shape) As Boolean
-    On Error Resume Next
-    If Not shp.CellExistsU("Prop.Closed", 0) Then Exit Function
-    Dim v As String: v = UCase$(Trim$(shp.CellsU("Prop.Closed").ResultStr("")))
-    If v = "TRUE" Or v = "1" Or v = "YES" Or v = "Y" Then IsClosed = True
-    If shp.CellsU("Prop.Closed").Result(visNone) <> 0 Then IsClosed = True
+    IsClosed = PropIsTrue(shp, Array("Closed"))
 End Function
 
 Private Function JStr(s As String) As String
