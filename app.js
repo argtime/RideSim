@@ -1171,9 +1171,11 @@ function drawAttrLabel(a) {
   const extra = (a.hoverText || "").trim();
   if (extra) extra.split(/\r?\n/).forEach(para =>
     wrapText(para, subFont, maxW).forEach(l => lines.push({ t: l, font: subFont, color: "#b9c4d6" })));
-  // actionable hint — tapping/clicking the label adds it to the sequence
-  const inSeq = seqIndexOf(a.id) >= 0;
-  lines.push({ t: inSeq ? "✓ in plan — tap to add again" : "＋ tap to add to plan", font: subFont, color: inSeq ? "#7bd88f" : "#9fd0ff" });
+  // actionable hint — tapping/clicking the label adds it to the sequence (a
+  // closed attraction still gets a bubble, but can't be added)
+  const closed = attrClosed(a), inSeq = seqIndexOf(a.id) >= 0;
+  if (closed) lines.push({ t: "closed — can't add to plan", font: subFont, color: "#e0a3a3" });
+  else lines.push({ t: inSeq ? "✓ in plan — tap to add again" : "＋ tap to add to plan", font: subFont, color: inSeq ? "#7bd88f" : "#9fd0ff" });
 
   const padX = 8, padY = 6, lineH = 15;
   let bw = 0;
@@ -1194,7 +1196,8 @@ function drawAttrLabel(a) {
   lines.forEach(l => { ctx.font = l.font; ctx.fillStyle = l.color; ctx.fillText(l.t, bx + bw / 2, lineY); lineY += lineH; });
 
   // remember where the label is so a click/tap on it can add the attraction
-  labelHit = { x: bx, y: by, w: bw, h: bh, id: a.id, nodeY: Y };
+  // (closed: no hit target, so a tap on the bubble won't add it)
+  labelHit = closed ? null : { x: bx, y: by, w: bw, h: bh, id: a.id, nodeY: Y };
 }
 // Greedy word-wrap to a max pixel width using the given font.
 function wrapText(text, font, maxW) {
@@ -1446,12 +1449,13 @@ function renderAttrList() {
     .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, undefined, { sensitivity: "base", numeric: true }));
   sorted.forEach(a => {
     const div = document.createElement("div");
-    div.className = "attr-item";
-    const dotColor = attrClosed(a) ? CLOSED_COLOR : ATTR_COLORS[attrCat(a)].off;
+    const closed = attrClosed(a);
+    div.className = "attr-item" + (closed ? " closed" : "");
+    const dotColor = closed ? CLOSED_COLOR : ATTR_COLORS[attrCat(a)].off;
     div.innerHTML = '<span class="dot" style="background:' + dotColor + '"></span><span class="nm">' + esc(a.name) +
-      (attrClosed(a) ? ' <span class="meta">(closed)</span>' : '') +
+      (closed ? ' <span class="meta">(closed)</span>' : '') +
       '</span><span class="meta">' + attrDuration(a) + 'm</span>';
-    div.onclick = () => { state.sequence.push(a.id); refresh(); };
+    div.onclick = () => { if (closed) return; state.sequence.push(a.id); refresh(); };   // can't plan a closed ride
     div.onmouseenter = () => {
       const r = dijkstra(lastLocation(), a.entranceNodeId);
       state.hoverPath = r ? buildRoute(r.path) : null; draw();
