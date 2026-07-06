@@ -1046,24 +1046,27 @@ function draw(marker) {
     const liveShow = live && (!live.open || typeof live.wait === "number");      // skip open-but-no-standby
     const ll = showLL ? llAvail(a) : null;          // AVAILABLE Lightning Lane (countdown takes over the center)
     // pins are points of interest — half the diameter of other markers
-    let radius = (hot ? sz.hot : sz.r) * (cat === "pin" || cat === "other" ? 0.5 : 1), fill, inside = "", insideColor = "#08263a";
+    let radius = (hot ? sz.hot : sz.r) * (cat === "pin" || cat === "other" ? 0.5 : 1), fill, inside = "", insideColor = "#08263a", closedFace = false;
     if (ll) {
       // LL available — show whole minutes until the return window opens, in gold.
       radius += 3;
       fill = LL_COLOR; inside = String(llMinutesUntil(ll)); insideColor = "#08263a";
     } else if (liveShow) {
       radius += 3;                                  // a touch bigger to fit the number
-      if (!live.open) { fill = CLOSED_COLOR; inside = "✕"; insideColor = "#fff"; }
+      if (!live.open) { fill = CLOSED_COLOR; closedFace = true; }   // sad face instead of a number
       else { fill = waitColor(live.wait); inside = String(live.wait); insideColor = "#fff"; }
     } else {
       fill = attrClosed(a) ? CLOSED_COLOR : (inSeq >= 0 ? ATTR_COLORS[cat].on : ATTR_COLORS[cat].off);
       inside = (inSeq >= 0 && cat !== "pin") ? String(inSeq + 1) : "";  // too small to hold a number
     }
+    if (attrClosed(a) && !inside) closedFace = true;  // authored-closed with no order number: sad face
     ctx.globalAlpha = 0.7;                              // named nodes 30% transparent (fill + stroke)
     ctx.beginPath(); ctx.arc(X, Y, radius, 0, 7);
     ctx.fillStyle = fill; ctx.fill();
     ctx.lineWidth = 2; ctx.strokeStyle = hot ? "#fff" : "#0f1420"; ctx.stroke();
-    if (inside) {
+    if (closedFace) {
+      drawSadFace(X, Y, radius, "#fff");
+    } else if (inside) {
       ctx.fillStyle = insideColor; ctx.font = "bold " + sz.font + "px sans-serif";
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
       ctx.fillText(inside, X, Y);
@@ -1100,6 +1103,26 @@ function draw(marker) {
     ctx.strokeStyle = marker.stroke || "#5cc8ff"; ctx.globalAlpha = .4; ctx.stroke(); ctx.globalAlpha = 1;
   }
   drawMyLocation();   // "you are here" GPS dot, on top
+}
+// A "closed" face inside a marker circle: two X eyes and a downturned mouth,
+// scaled to the circle radius r. Keeps the surrounding disc/stroke as-is.
+function drawSadFace(cx, cy, r, color) {
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1.3, r * 0.13);
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const e = r * 0.17, ey = cy - r * 0.22, ex = r * 0.36;   // X-eye half-size and centers
+  [-1, 1].forEach(sx => {
+    const c = cx + sx * ex;
+    ctx.beginPath();
+    ctx.moveTo(c - e, ey - e); ctx.lineTo(c + e, ey + e);
+    ctx.moveTo(c - e, ey + e); ctx.lineTo(c + e, ey - e);
+    ctx.stroke();
+  });
+  ctx.beginPath();                                          // frown: top arc of a circle below the mouth
+  ctx.arc(cx, cy + r * 0.95, r * 0.6, Math.PI * 1.25, Math.PI * 1.75);
+  ctx.stroke();
+  ctx.restore();
 }
 function drawPath(coords, color, lw, bright) {
   if (!coords || coords.length < 2) return;
