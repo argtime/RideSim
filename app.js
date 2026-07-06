@@ -1151,19 +1151,19 @@ function drawSadFace(cx, cy, r, color) {
 // Shelter overlay, drawn as part of the Heat layer: shaded areas as a light fill
 // plus a defined outline so the region reads even over the (already green) map.
 // Rain-cover and indoor polygons come later, with the rain features.
-const SHADE_COLOR = "#2e8b6f";   // cool green — stands out against the warm map
+const SHADE_COLOR = "#808080";   // neutral gray, like a cast shadow
 function drawShelters() {
   if (!showHeat || !state.shelters || !state.shelters.length) return;
   ctx.save();
-  ctx.lineWidth = 1.25; ctx.lineJoin = "round";
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = SHADE_COLOR;
   state.shelters.forEach(s => {
     const pts = s.points;
     if (!s.shade || !pts || pts.length < 3) return;
     ctx.beginPath();
     pts.forEach((p, i) => { i ? ctx.lineTo(tx(p.x), ty(p.y)) : ctx.moveTo(tx(p.x), ty(p.y)); });
     ctx.closePath();
-    ctx.globalAlpha = 0.22; ctx.fillStyle = SHADE_COLOR; ctx.fill();      // ~20% fill, as asked
-    ctx.globalAlpha = 0.6;  ctx.strokeStyle = SHADE_COLOR; ctx.stroke();  // outline for definition
+    ctx.fill();
   });
   ctx.restore();
 }
