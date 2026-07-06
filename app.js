@@ -2445,24 +2445,6 @@ function planLink() {
   u.searchParams.delete("t");         // drop any cache-buster
   return u.toString();
 }
-// Share button: native share sheet on mobile (where it's reliable), else copy
-// the link. Desktop Chrome can crash the renderer on navigator.share, so it's
-// gated to touch/mobile devices only and never used on desktop.
-function shareLink() {
-  if (!state.sequence.length) { alert("Add some stops to your plan first."); return; }
-  const url = planLink();
-  const btn = document.getElementById("shareBtn");
-  const data = { title: SAMPLE.meta.name + " — Day Plan", url: url };
-  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) && navigator.maxTouchPoints > 0;
-  if (mobile && navigator.share && (!navigator.canShare || navigator.canShare(data))) {
-    try {
-      const p = navigator.share(data);
-      if (p && p.catch) p.catch(() => {});
-      return;
-    } catch (e) { /* fall through to copy */ }
-  }
-  copyText(url, () => flashBtn(btn, "✓ Link copied"));
-}
 function copyText(text, onOk) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(text).then(onOk || function () {}, () => fallbackCopy(text, onOk));
@@ -2611,7 +2593,6 @@ function captureClear() {
 document.getElementById("playBtn").onclick = () => { playing ? pause() : play(); };
 document.getElementById("stopBtn").onclick = stop;
 document.getElementById("exportBtn").onclick = exportPlan;
-{ const sb = document.getElementById("shareBtn"); if (sb) sb.onclick = shareLink; }
 // Collapse the side panels (attractions / sequence) — the map fills the space.
 function setPanelHidden(side, hidden, resize) {
   const cap = side === "left" ? "Left" : "Right";
