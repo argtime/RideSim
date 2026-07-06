@@ -1646,9 +1646,16 @@ function renderTimeline() {
   });
 }
 
-// Sun (outdoor, yellow) vs AC (indoor, blue) across the day. Walking is always
-// sun; a queue uses qInside, a ride/dwell uses rInside (unset = outdoor).
-function insideQ(a) { return !!(a && a.qInside === true); }
+// Sun (outdoor, yellow) vs AC/shade (indoor, blue) across the day. Walking is
+// always sun; a ride/dwell uses rInside (unset = outdoor). A queue isn't all-or-
+// nothing: qSun is the fraction of the wait exposed to the sun/heat, and that hot
+// stretch is assumed to come first — so a queue splits into a hot head and a cool
+// tail (qInside true, from the old bool, means a fully shaded queue).
+function qSunFrac(a) {
+  if (a && typeof a.qSun === "number" && isFinite(a.qSun)) return Math.max(0, Math.min(1, a.qSun));
+  if (a && a.qInside === true) return 0;   // legacy: fully shaded queue
+  return 1;                                 // default: fully in the sun
+}
 function insideR(a) { return !!(a && a.rInside === true); }
 function sunSegments() {
   const segs = [];
@@ -1661,7 +1668,11 @@ function sunSegments() {
     const a = state.attractions.get(s.attractionId);
     push(typeof s.walkOnly === "number" ? s.walkOnly : s.walk, false);   // walking: sun
     push((s.transitRide || 0) + (s.transitBoard || 0), false);           // transit: open-air (default)
-    if (s.wait > 0) push(s.wait, insideQ(a));                            // queue
+    if (s.wait > 0) {                                                    // queue: hot head, cool tail
+      const f = qSunFrac(a);
+      push(s.wait * f, false);
+      push(s.wait * (1 - f), true);
+    }
     if (s.ride > 0) push(s.ride, insideR(a));                            // ride / dwell
   });
   let sun = 0, ac = 0;
@@ -1687,7 +1698,11 @@ function renderSunFooter() {
     state.steps.forEach((s, i) => {
       const attr = state.attractions.get(s.attractionId);
       add(s.walkStart, s.waitStart, false, "Walk to " + s.name, i);       // travel (walk + transit) = hot
-      if (s.wait > 0) add(s.waitStart, s.waitEnd, insideQ(attr), s.name + " queue", i);
+      if (s.wait > 0) {                                                    // queue: hot head, cool tail
+        const f = qSunFrac(attr), split = s.waitStart + (s.waitEnd - s.waitStart) * f;
+        add(s.waitStart, split, false, s.name + " queue (sun)", i);
+        add(split, s.waitEnd, true, s.name + " queue (shade)", i);
+      }
       if (s.ride > 0) add(s.rideStart, s.rideEnd, insideR(attr), s.name, i);
     });
     segHtml = blocks.map((b, i) => {

@@ -93,7 +93,10 @@ Attribute VB_Name = "VisioExport"
 '                        Prop.Closed      -> true = drawn gray (not open today).
 '                        Prop.Audio       -> URL/file looped while the avatar is
 '                        at this stop during the animation, written as "audio".
-'                        Prop.QInside     -> true if the QUEUE is indoor/AC.
+'                        Prop.QSun        -> fraction (0..1, or a % like 40) of
+'                        the QUEUE in the sun/heat, assumed at the front of the
+'                        line; written as "qSun". Prop.QInside (legacy bool) still
+'                        works and means a fully shaded queue (qSun = 0).
 '                        Prop.RInside     -> true if the time at this stop is
 '                        indoor/AC (a ride, restaurant, shop, pin, or other
 '                        dwell). Both feed the sun-vs-AC bar; emitted only when
@@ -409,7 +412,7 @@ Public Sub ExportRideSim()
         Dim trkJson As String: trkJson = ""
         If KeyExists(trackOf, "k" & shp.id) Then trkJson = trackOf("k" & shp.id)
         If attrCount > 0 Then attrJson = attrJson & "," & vbCrLf
-        attrJson = attrJson & AttractionJson(aId, ShapeName(shp), entId, exId, ac(0), ac(1), RideDur(shp), CategoryOf(shp), IsClosed(shp), WaitIdOf(shp), accJson, PropStr(shp, "Hovertext"), AvgWaitOf(shp), trkJson, ThpwIdOf(shp), PropStr(shp, "Audio"), PropIsTrue(shp, Array("QInside", "QueueInside")), PropIsTrue(shp, Array("RInside", "RideInside")))
+        attrJson = attrJson & AttractionJson(aId, ShapeName(shp), entId, exId, ac(0), ac(1), RideDur(shp), CategoryOf(shp), IsClosed(shp), WaitIdOf(shp), accJson, PropStr(shp, "Hovertext"), AvgWaitOf(shp), trkJson, ThpwIdOf(shp), PropStr(shp, "Audio"), PropIsTrue(shp, Array("QInside", "QueueInside")), PropIsTrue(shp, Array("RInside", "RideInside")), PropSunFrac(shp, Array("QSun", "QueueSun")))
         attrCount = attrCount + 1
     Next
 
@@ -1340,6 +1343,35 @@ Private Function TruthyCell(c As Visio.Cell) As Boolean
     If c.Result(visNone) <> 0 Then TruthyCell = True
 End Function
 
+' Fraction (0..1) of a queue exposed to sun/heat (Prop.QSun), by internal name
+' then visible label. A bare "40" is read as 40%. Returns -1 when unset so the
+' web app falls back to the qInside bool.
+Private Function PropSunFrac(shp As Visio.Shape, names As Variant) As Double
+    On Error Resume Next
+    PropSunFrac = -1
+    Dim i As Long, Row As Long
+    For i = LBound(names) To UBound(names)
+        If shp.CellExistsU("Prop." & names(i), 0) Then PropSunFrac = ClampFrac(shp.CellsU("Prop." & names(i))): Exit Function
+    Next i
+    For Row = 0 To shp.RowCount(visSectionProp) - 1
+        Dim lbl As String: lbl = shp.CellsSRC(visSectionProp, Row, 2).ResultStr(visNone)
+        For i = LBound(names) To UBound(names)
+            If lbl Like names(i) Then PropSunFrac = ClampFrac(shp.CellsSRC(visSectionProp, Row, 0)): Exit Function
+        Next i
+    Next Row
+End Function
+Private Function ClampFrac(c As Visio.Cell) As Double
+    On Error Resume Next
+    ClampFrac = -1
+    Dim s As String: s = Trim$(c.ResultStr(""))
+    If s = "" Then Exit Function                 ' blank cell -> unset
+    Dim v As Double: v = c.Result(visNone)
+    If v > 1 Then v = v / 100                     ' allow "40" to mean 40%
+    If v < 0 Then v = 0
+    If v > 1 Then v = 1
+    ClampFrac = v
+End Function
+
 Private Function CN(shp As Visio.Shape, cell As String) As Double
     On Error Resume Next
     CN = shp.CellsU(cell).ResultIU
@@ -1359,7 +1391,8 @@ Private Function AttractionJson(id As String, nm As String, entId As String, exI
                           x As Variant, y As Variant, ride As Double, cat As String, _
                           closed As Boolean, waitId As String, accessIds As String, _
                           hover As String, avgWait As Double, trackJson As String, _
-                          thpw As String, audio As String, qInside As Boolean, rInside As Boolean) As String
+                          thpw As String, audio As String, qInside As Boolean, rInside As Boolean, _
+                          qSun As Double) As String
     ' Emit each optional field only when set; otherwise lines match the original
     ' shape so the web app (ride/open defaults) is happy.
     Dim catJson As String
@@ -1380,8 +1413,12 @@ Private Function AttractionJson(id As String, nm As String, entId As String, exI
     If trackJson <> "" Then trkJson = ", ""track"": " & trackJson
     Dim audioJson As String
     If Trim$(audio) <> "" Then audioJson = ", ""audio"": """ & JStr(Trim$(audio)) & """"
-    Dim insideJson As String       ' indoor flags for the sun/AC bar (only when true)
-    If qInside Then insideJson = insideJson & ", ""qInside"": true"
+    Dim insideJson As String       ' indoor flags for the sun/AC bar (only when set)
+    If qSun >= 0 Then                                    ' fraction of the queue in the sun (hot head)
+        Dim q As Double: q = Int(qSun * 1000 + 0.5) / 1000
+        insideJson = insideJson & ", ""qSun"": " & Replace(CStr(q), ",", ".")
+    ElseIf qInside Then insideJson = insideJson & ", ""qInside"": true"   ' legacy fully-shaded queue
+    End If
     If rInside Then insideJson = insideJson & ", ""rInside"": true"
     AttractionJson = "  { ""id"": """ & id & """, ""name"": """ & JStr(nm) & _
         """, ""entranceNodeId"": """ & entId & """, ""exitNodeId"": """ & exId & _
