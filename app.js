@@ -1181,7 +1181,7 @@ const SHADE_COLOR = "#808080";   // neutral gray, like a cast shadow
 function drawShelters() {
   if (!showHeat || !state.shelters || !state.shelters.length) return;
   ctx.save();
-  ctx.globalAlpha = 0.6;
+  ctx.globalAlpha = 0.85;
   ctx.fillStyle = SHADE_COLOR;
   state.shelters.forEach(s => {
     const pts = s.points;
