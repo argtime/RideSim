@@ -522,13 +522,20 @@ function wetBulbF(tf, rh) {
     0.00391838 * Math.pow(rh, 1.5) * Math.atan(0.023101 * rh) - 4.686035;
   return tw * 9 / 5 + 32;        // °C -> °F
 }
-// Small thermometer-plus-droplet marking a "wet bulb" reading, bright-red stroke.
-const WB_ICON = '<svg class="wb-icon" viewBox="0 0 24 26" width="16" height="20" fill="none" ' +
-  'stroke="#ff2b2b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="wet bulb">' +
-  '<path d="M16 15.5V6a3 3 0 0 0-6 0v9.5a4.5 4.5 0 1 0 6 0z"/>' +
-  '<path d="M13 10v7"/>' +
-  '<path d="M5.5 12c0 0-2 2.2-2 3.6a2 2 0 0 0 4 0C7.5 14.2 5.5 12 5.5 12z" fill="#ff2b2b"/>' +
-  '</svg>';
+// Wet-bulb temperature (°F) at/above which we flag heat danger. Heat stress from
+// exertion starts to bite here; ~88–95°F is the genuinely hazardous band.
+const WB_DANGER_F = 80;
+// Small thermometer-plus-droplet marking a dangerous "wet bulb" reading, bright-
+// red stroke, with the actual value in a tooltip.
+function wbIcon(wb) {
+  return '<svg class="wb-icon" viewBox="0 0 24 26" width="16" height="20" fill="none" ' +
+    'stroke="#ff2b2b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<title>Wet bulb ' + Math.round(wb) + '° — heat danger</title>' +
+    '<path d="M16 15.5V6a3 3 0 0 0-6 0v9.5a4.5 4.5 0 1 0 6 0z"/>' +
+    '<path d="M13 10v7"/>' +
+    '<path d="M5.5 12c0 0-2 2.2-2 3.6a2 2 0 0 0 4 0C7.5 14.2 5.5 12 5.5 12z" fill="#ff2b2b"/>' +
+    '</svg>';
+}
 let weatherTimer = null;
 function fetchWeather() {
   const el = document.getElementById("feelsTemp"); if (!el) return;
@@ -544,11 +551,11 @@ function fetchWeather() {
       const air = c.temperature_2m;
       let wb = c.wet_bulb_temperature_2m;
       if (typeof wb !== "number") wb = wetBulbF(air, c.relative_humidity_2m);
-      // when the air is hotter than the wet-bulb temperature, flag it (a red
-      // wet-bulb icon ahead of the reading)
-      const showWB = isFinite(air) && isFinite(wb) && air > wb;
+      // flag heat danger: a red wet-bulb icon once the wet-bulb temperature is
+      // itself high (evaporative cooling can't keep up)
+      const showWB = isFinite(wb) && wb >= WB_DANGER_F;
       el.style.display = "flex";
-      el.innerHTML = (showWB ? WB_ICON : "") +
+      el.innerHTML = (showWB ? wbIcon(wb) : "") +
         '<div class="ft-text"><span class="lbl">feels like</span><span class="tm">' + Math.round(feels) + '°</span></div>';
     } else el.style.display = "none";
   }).catch(() => { el.style.display = "none"; });
