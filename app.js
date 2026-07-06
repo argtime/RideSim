@@ -1849,6 +1849,9 @@ function frame(ts) {
     const st = currentStretch(animClock);
     if (st) speed = Math.min(speed, st.ride / st.target);
   }
+  // no matter the chosen speed, blow through a long idle stretch quickly
+  const ff = dwellFastForward(animClock);
+  if (ff > speed) speed = ff;
   animClock += dtSec * speed;
 
   const span = simSpanMin();
@@ -1858,6 +1861,15 @@ function frame(ts) {
 }
 const RIDE_ANIM_SEC = 8;    // target real-time length of an animated ride
 const AUDIO_SEC = 12;       // target real-time length of an audio stop (so the clip is audible)
+const FF_MAX_SEC = 6;       // a long idle stretch (rest break, long queue) fast-forwards to at most this
+// A stop worth watching at a fixed real-time pace: an audio clip, or a ride with
+// a spin/track animation. Returns { target } real-seconds, else null.
+function watchableStop(s) {
+  const a = state.attractions.get(s.attractionId);
+  if (audioOn && a && a.audio) return { target: AUDIO_SEC };
+  const hasAnim = s.category === "ride" && (RIDE_SPIN[s.attractionId] || (a && Array.isArray(a.track) && a.track.length >= 2));
+  return hasAnim ? { target: RIDE_ANIM_SEC } : null;
+}
 // For the dwell the clock is in, return { ride, target } when it should be
 // stretched (has audio, or a ride with spin/track), else null.
 function currentStretch(clock) {
@@ -1865,13 +1877,28 @@ function currentStretch(clock) {
   const absT = state.steps[0].walkStart + clock;
   for (const s of state.steps) {
     if (s.ride > 0 && absT >= s.rideStart && absT < s.rideEnd) {
-      const a = state.attractions.get(s.attractionId);
-      if (audioOn && a && a.audio) return { ride: s.ride, target: AUDIO_SEC };
-      const hasAnim = s.category === "ride" && (RIDE_SPIN[s.attractionId] || (a && Array.isArray(a.track) && a.track.length >= 2));
-      return hasAnim ? { ride: s.ride, target: RIDE_ANIM_SEC } : null;
+      const w = watchableStop(s);
+      return w ? { ride: s.ride, target: w.target } : null;
     }
   }
   return null;
+}
+// A long, stationary stretch — a resort rest break or other big dwell, or a long
+// queue wait — has nothing moving to watch, so ticking through hours a minute at
+// a time is tedious. Fast-forward it to at most FF_MAX_SEC of real time. Returns
+// a speed floor in sim-min/sec (0 = nothing to skip here).
+function dwellFastForward(clock) {
+  if (!state.steps.length) return 0;
+  const absT = state.steps[0].walkStart + clock;
+  for (const s of state.steps) {
+    if (absT < s.walkEnd) return 0;                                    // walking — worth watching
+    if (absT < s.waitEnd) return s.wait > 0 ? s.wait / FF_MAX_SEC : 0;  // idle in a queue
+    if (absT < s.rideEnd) {                                             // dwelling / riding in place
+      if (watchableStop(s)) return 0;                                  // a spin/track/audio stop
+      return s.ride > 0 ? s.ride / FF_MAX_SEC : 0;
+    }
+  }
+  return 0;
 }
 
 // Hard-coded "spin" animations: the avatar orbits the ride's icon during the
