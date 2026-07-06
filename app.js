@@ -1084,9 +1084,9 @@ function draw(marker) {
     if ((liveShow || ll) && inSeq >= 0) drawSeqBadge(X, Y, radius, inSeq + 1);  // keep order visible
     ctx.globalAlpha = 1;
     if (ll) drawLLBadge(X, Y, radius);            // ⚡ bolt at the bottom of LL rides
-    // sun/shade ring for rides that carry queue-exposure info
-    if (showHeat && cat === "ride" && !attrClosed(a) && (typeof a.qSun === "number" || a.qInside != null))
-      drawQueueSunArc(X, Y, radius, qSunFrac(a));
+    // sun/shade heat ring: rides show the queue split, restaurants/shops a solid
+    // indoor/outdoor ring
+    if (showHeat) { const hf = heatRingFrac(a); if (hf != null) drawQueueSunArc(X, Y, radius, hf); }
   });
   if (hoverAttr) {
     const a = state.attractions.get(hoverAttr);
@@ -1709,16 +1709,32 @@ function renderTimeline() {
 }
 
 // Sun (outdoor, yellow) vs AC/shade (indoor, blue) across the day. Walking is
-// always sun; a ride/dwell uses rInside (unset = outdoor). A queue isn't all-or-
-// nothing: qSun is the fraction of the wait exposed to the sun/heat, and that hot
-// stretch is assumed to come first — so a queue splits into a hot head and a cool
-// tail (qInside true, from the old bool, means a fully shaded queue).
+// always sun; a ride/dwell uses rInside. A queue isn't all-or-nothing: qSun is
+// the fraction of the wait exposed to the sun/heat, and that hot stretch is
+// assumed to come first — so a queue splits into a hot head and a cool tail
+// (qInside true, from the old bool, means a fully shaded queue).
 function qSunFrac(a) {
   if (a && typeof a.qSun === "number" && isFinite(a.qSun)) return Math.max(0, Math.min(1, a.qSun));
   if (a && a.qInside === true) return 0;   // legacy: fully shaded queue
   return 1;                                 // default: fully in the sun
 }
-function insideR(a) { return !!(a && a.rInside === true); }
+// Is the time spent AT this stop indoor/AC? An explicit rInside (RInside in the
+// shape data) wins; otherwise shops are assumed indoor and everything else
+// outdoor. Drives the sun/AC colours in the bottom bar.
+function insideR(a) {
+  if (a && typeof a.rInside === "boolean") return a.rInside;
+  return attrCat(a) === "shop";
+}
+// Sun-fraction for the heat ring around a marker, or null for no ring. Rides
+// show their queue split (qSun); a restaurant/shop with an authored RInside shows
+// a solid ring — all sun (yellow) when outdoor, all shade (blue) when indoor.
+function heatRingFrac(a) {
+  if (!a || attrClosed(a)) return null;
+  const cat = attrCat(a);
+  if (cat === "ride" && (typeof a.qSun === "number" || a.qInside != null)) return qSunFrac(a);
+  if ((cat === "restaurant" || cat === "shop") && typeof a.rInside === "boolean") return a.rInside ? 0 : 1;
+  return null;
+}
 function sunSegments() {
   const segs = [];
   const push = (min, indoor) => {

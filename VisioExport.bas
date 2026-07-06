@@ -97,10 +97,12 @@ Attribute VB_Name = "VisioExport"
 '                        the QUEUE in the sun/heat, assumed at the front of the
 '                        line; written as "qSun". Prop.QInside (legacy bool) still
 '                        works and means a fully shaded queue (qSun = 0).
-'                        Prop.RInside     -> true if the time at this stop is
-'                        indoor/AC (a ride, restaurant, shop, pin, or other
-'                        dwell). Both feed the sun-vs-AC bar; emitted only when
-'                        true (unset/false = outdoor sun).
+'                        Prop.RInside (aka "Indoor") -> true if the time at this
+'                        stop is indoor/AC, false if outdoor. Feeds the sun-vs-AC
+'                        bar and the marker heat ring (yellow = outdoor/false,
+'                        blue = indoor/true) for restaurants & shops. Emitted as
+'                        true or false when set; if unset, shops default indoor
+'                        and everything else outdoor.
 '
 ' SCALE BAR (sets real-world walking speed):
 '   Add two shapes named (or mastered) ScaleStart and ScaleEnd and a line
@@ -412,7 +414,7 @@ Public Sub ExportRideSim()
         Dim trkJson As String: trkJson = ""
         If KeyExists(trackOf, "k" & shp.id) Then trkJson = trackOf("k" & shp.id)
         If attrCount > 0 Then attrJson = attrJson & "," & vbCrLf
-        attrJson = attrJson & AttractionJson(aId, ShapeName(shp), entId, exId, ac(0), ac(1), RideDur(shp), CategoryOf(shp), IsClosed(shp), WaitIdOf(shp), accJson, PropStr(shp, "Hovertext"), AvgWaitOf(shp), trkJson, ThpwIdOf(shp), PropStr(shp, "Audio"), PropIsTrue(shp, Array("QInside", "QueueInside")), PropIsTrue(shp, Array("RInside", "RideInside")), PropSunFrac(shp, Array("QSun", "QueueSun")))
+        attrJson = attrJson & AttractionJson(aId, ShapeName(shp), entId, exId, ac(0), ac(1), RideDur(shp), CategoryOf(shp), IsClosed(shp), WaitIdOf(shp), accJson, PropStr(shp, "Hovertext"), AvgWaitOf(shp), trkJson, ThpwIdOf(shp), PropStr(shp, "Audio"), PropIsTrue(shp, Array("QInside", "QueueInside")), PropTri(shp, Array("RInside", "RideInside", "Indoor")), PropSunFrac(shp, Array("QSun", "QueueSun")))
         attrCount = attrCount + 1
     Next
 
@@ -1342,6 +1344,22 @@ Private Function TruthyCell(c As Visio.Cell) As Boolean
     If s = "TRUE" Or s = "1" Or s = "YES" Or s = "Y" Then TruthyCell = True: Exit Function
     If c.Result(visNone) <> 0 Then TruthyCell = True
 End Function
+' Tri-state boolean by internal name then visible label: 1 = true, 0 = false,
+' -1 = the field isn't present at all (so the web app can apply its own default).
+Private Function PropTri(shp As Visio.Shape, names As Variant) As Long
+    On Error Resume Next
+    PropTri = -1
+    Dim i As Long, Row As Long
+    For i = LBound(names) To UBound(names)
+        If shp.CellExistsU("Prop." & names(i), 0) Then PropTri = IIf(TruthyCell(shp.CellsU("Prop." & names(i))), 1, 0): Exit Function
+    Next i
+    For Row = 0 To shp.RowCount(visSectionProp) - 1
+        Dim lbl As String: lbl = shp.CellsSRC(visSectionProp, Row, 2).ResultStr(visNone)
+        For i = LBound(names) To UBound(names)
+            If lbl Like names(i) Then PropTri = IIf(TruthyCell(shp.CellsSRC(visSectionProp, Row, 0)), 1, 0): Exit Function
+        Next i
+    Next Row
+End Function
 
 ' Fraction (0..1) of a queue exposed to sun/heat (Prop.QSun), by internal name
 ' then visible label. A bare "40" is read as 40%. Returns -1 when unset so the
@@ -1391,7 +1409,7 @@ Private Function AttractionJson(id As String, nm As String, entId As String, exI
                           x As Variant, y As Variant, ride As Double, cat As String, _
                           closed As Boolean, waitId As String, accessIds As String, _
                           hover As String, avgWait As Double, trackJson As String, _
-                          thpw As String, audio As String, qInside As Boolean, rInside As Boolean, _
+                          thpw As String, audio As String, qInside As Boolean, rInsideTri As Long, _
                           qSun As Double) As String
     ' Emit each optional field only when set; otherwise lines match the original
     ' shape so the web app (ride/open defaults) is happy.
@@ -1419,7 +1437,8 @@ Private Function AttractionJson(id As String, nm As String, entId As String, exI
         insideJson = insideJson & ", ""qSun"": " & Replace(CStr(q), ",", ".")
     ElseIf qInside Then insideJson = insideJson & ", ""qInside"": true"   ' legacy fully-shaded queue
     End If
-    If rInside Then insideJson = insideJson & ", ""rInside"": true"
+    If rInsideTri = 1 Then insideJson = insideJson & ", ""rInside"": true"     ' indoor/AC (blue)
+    If rInsideTri = 0 Then insideJson = insideJson & ", ""rInside"": false"    ' outdoor (yellow) — emitted so it beats the shop-indoor default
     AttractionJson = "  { ""id"": """ & id & """, ""name"": """ & JStr(nm) & _
         """, ""entranceNodeId"": """ & entId & """, ""exitNodeId"": """ & exId & _
         """, ""displayLocation"": { ""x"": " & CLng(x) & ", ""y"": " & CLng(y) & _
