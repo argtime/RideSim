@@ -1694,24 +1694,27 @@ function renderSunFooter() {
   let segHtml = "", legend = "";
   if (state.steps.length) {
     const blocks = [];
-    const add = (a, b, indoor, label, step) => { if (b > a) blocks.push({ a: a, b: b, indoor: indoor, label: label, step: step }); };
+    // kind: "sun" (outdoor/hot), "shade" (shaded queue — cool but not AC), "ac" (indoor)
+    const add = (a, b, kind, label, step) => { if (b > a) blocks.push({ a: a, b: b, kind: kind, label: label, step: step }); };
     state.steps.forEach((s, i) => {
       const attr = state.attractions.get(s.attractionId);
-      add(s.walkStart, s.waitStart, false, "Walk to " + s.name, i);       // travel (walk + transit) = hot
+      add(s.walkStart, s.waitStart, "sun", "Walk to " + s.name, i);       // travel (walk + transit) = hot
       if (s.wait > 0) {                                                    // queue: hot head, cool tail
         const f = qSunFrac(attr), split = s.waitStart + (s.waitEnd - s.waitStart) * f;
-        add(s.waitStart, split, false, s.name + " queue (sun)", i);
-        add(split, s.waitEnd, true, s.name + " queue (shade)", i);
+        add(s.waitStart, split, "sun", s.name + " queue (sun)", i);
+        add(split, s.waitEnd, "shade", s.name + " queue (shade)", i);
       }
-      if (s.ride > 0) add(s.rideStart, s.rideEnd, insideR(attr), s.name, i);
+      if (s.ride > 0) add(s.rideStart, s.rideEnd, insideR(attr) ? "ac" : "sun", s.name, i);
     });
+    const KIND = { sun: { c: "#ffcc4d", tip: "Hot" }, shade: { c: "#a9def0", tip: "Shade" }, ac: { c: "var(--accent)", tip: "AC" } };
     segHtml = blocks.map((b, i) => {
       const left = (((b.a % DAY) + DAY) % DAY) / DAY * 100, w = (b.b - b.a) / DAY * 100;
-      const tip = (b.indoor ? "AC" : "Hot") + " · " + b.label + " · " + minToHM(b.a) + "–" + minToHM(b.b);
+      const k = KIND[b.kind];
+      const tip = k.tip + " · " + b.label + " · " + minToHM(b.a) + "–" + minToHM(b.b);
       // 1px black divider between contiguous same-color blocks (none across a color change)
-      const div = (i > 0 && blocks[i - 1].indoor === b.indoor) ? ";border-left:1px solid #000" : "";
+      const div = (i > 0 && blocks[i - 1].kind === b.kind) ? ";border-left:1px solid #000" : "";
       return '<div class="sf-seg" data-step="' + b.step + '" style="left:' + left.toFixed(3) + '%;width:' + Math.max(w, 0.06).toFixed(3) +
-        '%;background:' + (b.indoor ? "var(--accent)" : "#ffcc4d") + div + '" title="' + esc(tip) + '"></div>';
+        '%;background:' + k.c + div + '" title="' + esc(tip) + '"></div>';
     }).join("");
     const d = sunSegments();
     legend = '<span style="color:#ffcc4d">☀️ ' + fmtDur(d.sun) + '</span><span style="color:var(--accent)">❄️ ' + fmtDur(d.ac) + '</span>';
