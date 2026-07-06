@@ -1055,9 +1055,12 @@ function draw(marker) {
       insideColor = "#fff";
       closedFace = !inside;
     } else if (ll) {
-      // LL available — show whole minutes until the return window opens, in gold.
+      // LL available — minutes until the return window opens, in gold; but past
+      // 90 min out, the countdown is less useful than the actual return time.
       radius += 3;
-      fill = LL_COLOR; inside = String(llMinutesUntil(ll)); insideColor = "#08263a";
+      const mins = llMinutesUntil(ll);
+      inside = (mins != null && mins > 90) ? tCompactFromISO(ll.start) : (mins == null ? "" : String(mins));
+      fill = LL_COLOR; insideColor = "#08263a";
     } else if (liveShow) {
       radius += 3;                                  // a touch bigger to fit the number
       if (!live.open) { fill = CLOSED_COLOR; inside = "✕"; insideColor = "#fff"; }   // just down right now (API) — still plannable
@@ -1367,6 +1370,14 @@ function t12FromISO(iso) {
   const d = new Date(iso); if (isNaN(d.getTime())) return "";
   let h = d.getHours(); const m = d.getMinutes(); const ap = h < 12 ? "AM" : "PM";
   return (h % 12 || 12) + ":" + String(m).padStart(2, "0") + " " + ap;
+}
+// Ultra-compact clock for a marker: "10p" (10:00 pm), "9.35a" (9:35 am). Drops
+// the minutes when they're :00; single-letter am/pm.
+function tCompactFromISO(iso) {
+  if (!iso) return "";
+  const d = new Date(iso); if (isNaN(d.getTime())) return "";
+  const h = d.getHours(), m = d.getMinutes(), ap = h < 12 ? "a" : "p", hh = h % 12 || 12;
+  return hh + (m ? "." + String(m).padStart(2, "0") : "") + ap;
 }
 function drawLLBadge(X, Y, r) {
   const br = Math.max(4, r * 0.55);            // badge scales with the circle (smaller on mobile)
