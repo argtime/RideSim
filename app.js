@@ -536,6 +536,41 @@ function wbIcon(wb) {
     '<path d="M5.5 12c0 0-2 2.2-2 3.6a2 2 0 0 0 4 0C7.5 14.2 5.5 12 5.5 12z" fill="#ff2b2b"/>' +
     '</svg>';
 }
+// UV Index badge — a little sun with the current UV number, ringed by the WHO/EPA
+// exposure-category colour (0–2 low green, 3–5 moderate yellow, 6–7 high orange,
+// 8–10 very-high red, 11+ extreme violet). Shown in the top-left with Heat on.
+let lastUv = null;
+function uvColor(uv) {
+  if (uv < 3) return "#4caf50";
+  if (uv < 6) return "#f5c500";
+  if (uv < 8) return "#ff8a00";
+  if (uv < 11) return "#e53935";
+  return "#8e44ad";
+}
+function uvSunSvg(uv, color) {
+  let rays = "";
+  for (let i = 0; i < 8; i++) {                       // 8 rays around the disc
+    const a = i * Math.PI / 4, cx = 22, cy = 22;
+    rays += '<line x1="' + (cx + 15 * Math.cos(a)).toFixed(1) + '" y1="' + (cy + 15 * Math.sin(a)).toFixed(1) +
+            '" x2="' + (cx + 20 * Math.cos(a)).toFixed(1) + '" y2="' + (cy + 20 * Math.sin(a)).toFixed(1) + '"/>';
+  }
+  return '<svg viewBox="0 0 44 44" width="40" height="40">' +
+    '<g stroke="' + color + '" stroke-width="2" stroke-linecap="round">' + rays + '</g>' +
+    '<circle cx="22" cy="22" r="12.5" fill="rgba(16,22,36,.92)" stroke="' + color + '" stroke-width="2.5"/>' +
+    '<text x="22" y="22.5" text-anchor="middle" dominant-baseline="central" font-family="sans-serif" ' +
+    'font-size="14" font-weight="700" fill="#fff">' + uv + '</text></svg>';
+}
+function renderUvBadge() {
+  const el = document.getElementById("uvBadge"); if (!el) return;
+  const show = showHeat && typeof lastUv === "number" && isFinite(lastUv);
+  el.style.display = show ? "block" : "none";
+  document.body.classList.toggle("uv-shown", show);
+  if (show) {
+    const uv = Math.max(0, Math.round(lastUv));
+    el.innerHTML = uvSunSvg(uv, uvColor(uv));
+    el.title = "UV index " + uv;
+  }
+}
 let weatherTimer = null;
 function fetchWeather() {
   const el = document.getElementById("feelsTemp"); if (!el) return;
@@ -543,9 +578,11 @@ function fetchWeather() {
   if (!ll) { el.style.display = "none"; return; }   // uncalibrated park: no location, no temp
   const url = "https://api.open-meteo.com/v1/forecast?latitude=" + ll.lat.toFixed(4) +
     "&longitude=" + ll.lon.toFixed(4) +
-    "&current=apparent_temperature,temperature_2m,relative_humidity_2m,wet_bulb_temperature_2m&temperature_unit=fahrenheit";
+    "&current=apparent_temperature,temperature_2m,relative_humidity_2m,wet_bulb_temperature_2m,uv_index&temperature_unit=fahrenheit";
   fetch(url, { cache: "no-store" }).then(r => r.json()).then(d => {
     const c = (d && d.current) || {};
+    lastUv = (typeof c.uv_index === "number" && isFinite(c.uv_index)) ? c.uv_index : null;
+    renderUvBadge();
     const feels = c.apparent_temperature;
     if (typeof feels === "number" && isFinite(feels)) {
       const air = c.temperature_2m;
@@ -2768,7 +2805,7 @@ function setHeatToggleUI() { const b = document.getElementById("heatToggle"); if
 { const hb = document.getElementById("heatToggle"); if (hb) hb.onclick = () => {
   showHeat = !showHeat;
   localStorage.setItem("ridesim.heat", showHeat ? "1" : "0");
-  setHeatToggleUI(); draw();
+  setHeatToggleUI(); renderUvBadge(); draw();
 }; }
 setHeatToggleUI();
 function setAudioToggleUI() { document.getElementById("audioToggle").classList.toggle("active", audioOn); }
