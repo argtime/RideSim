@@ -788,6 +788,7 @@ let selectedStep = null; // step index selected by tapping its sequence-list ite
 // One live source — ThemeParks.wiki — powers both standby waits and Lightning Lane.
 let showLiveWaits = localStorage.getItem("ridesim.liveWaits") === "1"; // standby wait overlay
 let showLL = localStorage.getItem("ridesim.ll") === "1";               // Lightning Lane overlay
+let showHeat = localStorage.getItem("ridesim.heat") !== "0";           // sun/shade queue ring (on by default)
 let llPanelCollapsed = localStorage.getItem("ridesim.llCollapsed") === "1"; // LL list minimized to header
 // byId: entity GUID -> entry; byName: normName -> entry; entry = {name, wait, open, ll}
 const liveWaits = { byId: new Map(), byName: new Map(), fetchedAt: 0, error: false, errMsg: "",
@@ -1084,7 +1085,7 @@ function draw(marker) {
     ctx.globalAlpha = 1;
     if (ll) drawLLBadge(X, Y, radius);            // ⚡ bolt at the bottom of LL rides
     // sun/shade ring for rides that carry queue-exposure info
-    if (cat === "ride" && !attrClosed(a) && (typeof a.qSun === "number" || a.qInside != null))
+    if (showHeat && cat === "ride" && !attrClosed(a) && (typeof a.qSun === "number" || a.qInside != null))
       drawQueueSunArc(X, Y, radius, qSunFrac(a));
   });
   if (hoverAttr) {
@@ -2703,6 +2704,13 @@ document.getElementById("llToggle").onclick = () => {
   setLLToggleUI(); liveToggled();
 };
 setLLToggleUI();
+function setHeatToggleUI() { const b = document.getElementById("heatToggle"); if (b) b.classList.toggle("active", showHeat); }
+{ const hb = document.getElementById("heatToggle"); if (hb) hb.onclick = () => {
+  showHeat = !showHeat;
+  localStorage.setItem("ridesim.heat", showHeat ? "1" : "0");
+  setHeatToggleUI(); draw();
+}; }
+setHeatToggleUI();
 function setAudioToggleUI() { document.getElementById("audioToggle").classList.toggle("active", audioOn); }
 document.getElementById("audioToggle").onclick = () => {
   audioOn = !audioOn;
