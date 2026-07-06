@@ -1047,19 +1047,25 @@ function draw(marker) {
     const ll = showLL ? llAvail(a) : null;          // AVAILABLE Lightning Lane (countdown takes over the center)
     // pins are points of interest — half the diameter of other markers
     let radius = (hot ? sz.hot : sz.r) * (cat === "pin" || cat === "other" ? 0.5 : 1), fill, inside = "", insideColor = "#08263a", closedFace = false;
-    if (ll) {
+    if (attrClosed(a)) {
+      // authored (long-term / seasonal) closure — sad face, can't be planned. Wins
+      // over any live data. Keeps the order number if it's somehow already in a plan.
+      fill = CLOSED_COLOR;
+      inside = (inSeq >= 0 && cat !== "pin") ? String(inSeq + 1) : "";
+      insideColor = "#fff";
+      closedFace = !inside;
+    } else if (ll) {
       // LL available — show whole minutes until the return window opens, in gold.
       radius += 3;
       fill = LL_COLOR; inside = String(llMinutesUntil(ll)); insideColor = "#08263a";
     } else if (liveShow) {
       radius += 3;                                  // a touch bigger to fit the number
-      if (!live.open) { fill = CLOSED_COLOR; closedFace = true; }   // sad face instead of a number
+      if (!live.open) { fill = CLOSED_COLOR; inside = "✕"; insideColor = "#fff"; }   // just down right now (API) — still plannable
       else { fill = waitColor(live.wait); inside = String(live.wait); insideColor = "#fff"; }
     } else {
-      fill = attrClosed(a) ? CLOSED_COLOR : (inSeq >= 0 ? ATTR_COLORS[cat].on : ATTR_COLORS[cat].off);
+      fill = inSeq >= 0 ? ATTR_COLORS[cat].on : ATTR_COLORS[cat].off;
       inside = (inSeq >= 0 && cat !== "pin") ? String(inSeq + 1) : "";  // too small to hold a number
     }
-    if (attrClosed(a) && !inside) closedFace = true;  // authored-closed with no order number: sad face
     ctx.globalAlpha = 0.7;                              // named nodes 30% transparent (fill + stroke)
     ctx.beginPath(); ctx.arc(X, Y, radius, 0, 7);
     ctx.fillStyle = fill; ctx.fill();
