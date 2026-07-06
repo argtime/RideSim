@@ -834,20 +834,20 @@ Private Function BuildSheltersJson(pg As Visio.Page, ByRef cnt As Long) As Strin
 End Function
 
 ' A shape's outline as JSON point objects (inner list, no brackets), in page px.
-' Empty when it has fewer than 3 vertices (not a usable polygon).
+' Uses Shape.Paths, which returns the flattened outline already transformed into
+' the parent (page) coordinate system — Visio applies pin/angle/flip/size for us.
+' That fixes primitives like the Rectangle tool, whose Geometry cells are Width/
+' Height *formulas* that the raw-cell reader placed wrong. Empty for <3 points.
 Private Function PolygonPointsJson(shp As Visio.Shape) As String
     Dim pts As Collection: Set pts = New Collection
     On Error Resume Next
-    Dim i As Long, r As Long, xl As Double, yl As Double
-    For i = 1 To shp.GeometryCount
-        r = 1
-        Do While shp.CellExistsU("Geometry" & i & ".X" & r, 0)
-            xl = shp.CellsU("Geometry" & i & ".X" & r).ResultIU
-            yl = shp.CellsU("Geometry" & i & ".Y" & r).ResultIU
-            pts.Add LocalToPagePx(shp, xl, yl)
-            r = r + 1
-        Loop
-    Next i
+    Dim pth As Visio.Path, arr As Variant, k As Long
+    For Each pth In shp.Paths
+        arr = pth.Points(0.05)                 ' flatness (inches); small = smoother curves
+        For k = LBound(arr) To UBound(arr) - 1 Step 2
+            pts.Add Array(Round(arr(k) * PPI), Round((mPageH - arr(k + 1)) * PPI))
+        Next k
+    Next pth
     On Error GoTo 0
     If pts.Count < 3 Then Exit Function
     Dim s As String, kk As Long, pv As Variant
