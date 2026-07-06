@@ -1737,11 +1737,18 @@ function updateEndClock() {
 
 // Keep the address bar in sync with the current plan, so a refresh restores it
 // (and Clear, which empties the sequence, drops the ?plan param).
+function getPlanTitle() {
+  const el = document.getElementById("planTitle");
+  return el ? el.value.trim() : "";
+}
 function syncPlanUrl() {
   try {
     const u = new URL(location.href);
     if (state.sequence.length) u.searchParams.set("plan", planToParam());
     else u.searchParams.delete("plan");
+    const t = getPlanTitle();
+    if (t) u.searchParams.set("title", t);
+    else u.searchParams.delete("title");
     history.replaceState(null, "", u.toString());
   } catch (e) {}
 }
@@ -2190,7 +2197,10 @@ function applyData() {
 // it can be copied out and pasted back. Transit rides: "🚂 Line → Stop".
 function planText() {
   const startMin = hmToMin(document.getElementById("startTime").value || "09:00");
-  const header = "Start: " + t12(startMin);   // round-trips the chosen start time
+  const header = [];
+  const title = getPlanTitle();
+  if (title) header.push("Title - " + title);   // round-trips the itinerary name
+  header.push("Start: " + t12(startMin));        // round-trips the chosen start time
   const lines = state.sequence.map(id => {
     if (isTransitToken(id)) {
       const p = parseTransitToken(id);
@@ -2213,7 +2223,7 @@ function planText() {
     }
     return line;
   });
-  return [header].concat(lines).join("\n");
+  return header.concat(lines).join("\n");
 }
 // "8:30 AM" / "08:30" -> "HH:MM" (24h) for the start-time input. null if unparseable.
 function clockTo24(s) {
@@ -2247,6 +2257,13 @@ function parsePlan(text) {
   String(text || "").split(/\r?\n/).forEach(raw => {
     let line = raw.trim();
     if (!line) return;
+    // a "Title - My Day" header names the itinerary (not a sequence stop)
+    if (/^title\s*[-:]/i.test(line)) {
+      const t = line.replace(/^title\s*[-:]\s*/i, "").trim();
+      const inp = document.getElementById("planTitle");
+      if (inp) inp.value = t;
+      return;
+    }
     // a "Start: 8:30 AM" header sets the day's start time (not a sequence stop)
     if (/^start\b/i.test(line)) {
       const t = clockTo24(line), inp = document.getElementById("startTime");
@@ -2342,7 +2359,10 @@ function flashBtn(btn, label) {
 }
 // Apply a "?plan=" value to the start time + sequence. Returns true if present.
 function loadPlanParam() {
-  const v = new URLSearchParams(location.search).get("plan");
+  const sp = new URLSearchParams(location.search);
+  const ti = sp.get("title");   // a named itinerary; may be present without a plan
+  if (ti != null) { const inp = document.getElementById("planTitle"); if (inp) inp.value = ti; }
+  const v = sp.get("plan");
   if (!v) return false;
   const parts = v.split(",").filter(Boolean);
   let i = 0;
@@ -2512,6 +2532,8 @@ function pastePlanFromClipboard() {
   } else openPlanModal();
 }
 document.getElementById("startTime").onchange = () => { stop(); refresh(); };
+// Naming the itinerary only affects the shareable link, not the computed plan.
+(() => { const pt = document.getElementById("planTitle"); if (pt) pt.oninput = syncPlanUrl; })();
 // With a sequence stop selected, Up/Down arrows move to the prev/next stop
 // (ignored while typing in a field).
 document.addEventListener("keydown", (e) => {
