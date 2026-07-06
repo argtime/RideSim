@@ -2774,14 +2774,24 @@ canvas.addEventListener("mousemove", (ev) => {
   if (seg !== null) showSegTip(seg, ev); else hideSegTip();
   if (id !== hoverAttr || seg !== hoverStep) { hoverAttr = id; hoverStep = seg; draw(); }
 });
-// tap/click on the hover label adds that attraction to the sequence
+// Tap/click handling. Priority: (1) tap the open label -> add that attraction;
+// (2) tap another attraction icon -> switch the bubble to it (no need to first
+// deselect — important on mobile, where there's no hover to swap bubbles);
+// (3) tap empty space -> close the open bubble.
 canvas.addEventListener("click", (ev) => {
-  if (addMode || bgAdjust || !labelHit) return;
+  if (addMode || bgAdjust) return;
   const p = canvasXY(ev);
-  if (p.x >= labelHit.x && p.x <= labelHit.x + labelHit.w && p.y >= labelHit.y && p.y <= labelHit.y + labelHit.h) {
+  if (labelHit && p.x >= labelHit.x && p.x <= labelHit.x + labelHit.w && p.y >= labelHit.y && p.y <= labelHit.y + labelHit.h) {
     state.sequence.push(labelHit.id);
     refresh();
+    return;
   }
+  const id = attractionAt(ev);
+  if (id) {                                   // open/switch to the tapped attraction
+    if (id !== hoverAttr) { hoverAttr = id; hoverStep = null; draw(); }
+    return;
+  }
+  if (hoverAttr || hoverStep !== null) { hoverAttr = null; hoverStep = null; draw(); }   // tapped nothing -> close
 });
 canvas.addEventListener("mouseleave", () => {
   hideSegTip();
