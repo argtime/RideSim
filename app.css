@@ -125,8 +125,9 @@
   .feels-temp {
     position: absolute; right: 12px; top: 12px; display: none; text-align: right;
     background: rgba(16,22,36,.82); border: 1px solid var(--border); border-radius: 8px;
-    padding: 4px 10px 5px; line-height: 1.05;
+    padding: 4px 10px 5px; line-height: 1.05; align-items: center; gap: 7px;
   }
+  .feels-temp .wb-icon { flex: none; }
   .feels-temp .lbl { display: block; font-size: 9px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
   .feels-temp .tm { font-size: 18px; font-weight: 700; color: var(--text); }
   /* finish-time clock, top-left of the map */

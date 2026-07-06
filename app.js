@@ -512,18 +512,44 @@ function parkCentroidLatLon() {
   if (!a.length) return null;
   return { lat: a.reduce((s, x) => s + x.lat, 0) / a.length, lon: a.reduce((s, x) => s + x.lon, 0) / a.length };
 }
+// Wet-bulb temperature (°F) from air temp (°F) + relative humidity (%), via the
+// Stull (2011) approximation. Fallback for when the API doesn't return it.
+function wetBulbF(tf, rh) {
+  if (!isFinite(tf) || !isFinite(rh)) return null;
+  const T = (tf - 32) * 5 / 9;   // °F -> °C
+  const tw = T * Math.atan(0.151977 * Math.sqrt(rh + 8.313659)) +
+    Math.atan(T + rh) - Math.atan(rh - 1.676331) +
+    0.00391838 * Math.pow(rh, 1.5) * Math.atan(0.023101 * rh) - 4.686035;
+  return tw * 9 / 5 + 32;        // °C -> °F
+}
+// Small thermometer-plus-droplet marking a "wet bulb" reading, bright-red stroke.
+const WB_ICON = '<svg class="wb-icon" viewBox="0 0 24 26" width="16" height="20" fill="none" ' +
+  'stroke="#ff2b2b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="wet bulb">' +
+  '<path d="M16 15.5V6a3 3 0 0 0-6 0v9.5a4.5 4.5 0 1 0 6 0z"/>' +
+  '<path d="M13 10v7"/>' +
+  '<path d="M5.5 12c0 0-2 2.2-2 3.6a2 2 0 0 0 4 0C7.5 14.2 5.5 12 5.5 12z" fill="#ff2b2b"/>' +
+  '</svg>';
 let weatherTimer = null;
 function fetchWeather() {
   const el = document.getElementById("feelsTemp"); if (!el) return;
   const ll = parkCentroidLatLon();
   if (!ll) { el.style.display = "none"; return; }   // uncalibrated park: no location, no temp
   const url = "https://api.open-meteo.com/v1/forecast?latitude=" + ll.lat.toFixed(4) +
-    "&longitude=" + ll.lon.toFixed(4) + "&current=apparent_temperature&temperature_unit=fahrenheit";
+    "&longitude=" + ll.lon.toFixed(4) +
+    "&current=apparent_temperature,temperature_2m,relative_humidity_2m,wet_bulb_temperature_2m&temperature_unit=fahrenheit";
   fetch(url, { cache: "no-store" }).then(r => r.json()).then(d => {
-    const t = d && d.current && d.current.apparent_temperature;
-    if (typeof t === "number" && isFinite(t)) {
-      el.style.display = "block";
-      el.innerHTML = '<span class="lbl">feels like</span><span class="tm">' + Math.round(t) + '°</span>';
+    const c = (d && d.current) || {};
+    const feels = c.apparent_temperature;
+    if (typeof feels === "number" && isFinite(feels)) {
+      const air = c.temperature_2m;
+      let wb = c.wet_bulb_temperature_2m;
+      if (typeof wb !== "number") wb = wetBulbF(air, c.relative_humidity_2m);
+      // when the air is hotter than the wet-bulb temperature, flag it (a red
+      // wet-bulb icon ahead of the reading)
+      const showWB = isFinite(air) && isFinite(wb) && air > wb;
+      el.style.display = "flex";
+      el.innerHTML = (showWB ? WB_ICON : "") +
+        '<div class="ft-text"><span class="lbl">feels like</span><span class="tm">' + Math.round(feels) + '°</span></div>';
     } else el.style.display = "none";
   }).catch(() => { el.style.display = "none"; });
 }
