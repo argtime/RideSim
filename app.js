@@ -1248,6 +1248,8 @@ function draw(marker) {
     }
   }
 
+  drawShelters("under");   // gray shade sits just above the map, under the icons
+
   // connections (part of the graph — hidden when graph is toggled off)
   if (showGraph) {
     ctx.lineWidth = 2; ctx.strokeStyle = "#2b3a57";
@@ -1405,7 +1407,7 @@ function draw(marker) {
     if (showHeat) { const hf = heatRingFrac(a); if (hf != null) drawQueueSunArc(X, Y, radius, hf); }
   });
 
-  drawShelters();   // shade overlay (Heat layer) — above the icons, below labels/avatar
+  drawShelters("over");   // pink shade (panel expanded) + flashes — above the icons, below labels/avatar
 
   if (hoverAttr) {
     const a = state.attractions.get(hoverAttr);
@@ -1476,28 +1478,30 @@ function drawSadFace(cx, cy, r, color) {
 // Rain-cover and indoor polygons come later, with the rain features.
 const SHADE_GRAY = "#808080";   // subtle shade fill when Heat is on but the shelter panel is collapsed
 const SHADE_PINK = "#ff1a8c";   // prominent shade fill while the shelter panel is expanded
-function drawShelters() {
+// phase "under" = just above the map (below icons), "over" = above the icons.
+// Pink & more opaque while the shelter panel is open (actively picking shade), and
+// drawn on top; the unobtrusive gray sits underneath the icons. Flashes are always
+// on top.
+function drawShelters(phase) {
   if (!state.shelters || !state.shelters.length) return;
   const anyFlash = flashShadeIdx >= 0;
   if (!showHeat && !anyFlash) return;            // flashed cover can show even with Heat off
-  // pink & more opaque while the shelter panel is open (actively picking shade),
-  // otherwise an unobtrusive gray
   const panel = document.getElementById("shadePanel");
   const expanded = showHeat && panel && panel.style.display !== "none" && !shadePanelCollapsed;
+  const fillPhase = expanded ? "over" : "under";
   const fill = expanded ? SHADE_PINK : SHADE_GRAY, alpha = expanded ? 0.65 : 0.5;
   ctx.save();
   state.shelters.forEach((s, idx) => {
     const pts = s.points, isFlash = idx === flashShadeIdx;
     if (!pts || pts.length < 3) return;
-    const drawFill = showHeat && s.shade;        // shade gets a fill; other types only drawn to flash
-    if (!drawFill && !isFlash) return;
+    const wantFill = showHeat && s.shade && phase === fillPhase;   // shade fill in its phase
+    const wantFlash = isFlash && phase === "over";                 // flashes always on top
+    if (!wantFill && !wantFlash) return;
     ctx.beginPath();
     pts.forEach((p, i) => { i ? ctx.lineTo(tx(p.x), ty(p.y)) : ctx.moveTo(tx(p.x), ty(p.y)); });
     ctx.closePath();
-    if (drawFill) { ctx.globalAlpha = alpha; ctx.fillStyle = fill; ctx.fill(); }
-    if (isFlash) {                               // a tapped shelter row: bright outline
-      ctx.globalAlpha = 1; ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
-    }
+    if (wantFill) { ctx.globalAlpha = alpha; ctx.fillStyle = fill; ctx.fill(); }
+    if (wantFlash) { ctx.globalAlpha = 1; ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke(); }
   });
   ctx.restore();
 }
