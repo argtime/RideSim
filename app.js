@@ -1330,6 +1330,8 @@ function draw(marker) {
   // hover preview (already a coords polyline)
   if (state.hoverPath)
     drawPath(state.hoverPath, "rgba(255,204,77,0.55)", 3, false);
+  if (flashRoute)
+    drawPath(flashRoute, "rgba(92,200,255,0.9)", 4, false);   // shelter-preview walk
 
   // junction nodes (part of the graph — hidden when graph is toggled off)
   if (showGraph) {
@@ -1500,7 +1502,7 @@ function drawShelters(phase) {
     const pts = s.points, isFlash = idx === flashShadeIdx;
     if (!pts || pts.length < 3) return;
     const wantFill = showHeat && s.shade && phase === fillPhase;   // shade fill in its phase
-    const wantFlash = isFlash && phase === "over";                 // flashes always on top
+    const wantFlash = isFlash && phase === "over" && flashBlinkOn; // blinking flash, always on top
     if (!wantFill && !wantFlash) return;
     ctx.beginPath();
     pts.forEach((p, i) => { i ? ctx.lineTo(tx(p.x), ty(p.y)) : ctx.moveTo(tx(p.x), ty(p.y)); });
@@ -1898,12 +1900,25 @@ function nearestAttrName(pt) {
   });
   return best;
 }
-let flashShadeIdx = -1, flashShadeTimer = null;
+let flashShadeIdx = -1, flashBlinkOn = true, flashRoute = null, flashTimers = [];
+function clearFlash() {
+  flashTimers.forEach(clearTimeout); flashTimers = [];
+  flashShadeIdx = -1; flashRoute = null;
+}
+// Blink a shelter polygon a few times and preview the walk from where you are to
+// the node nearest that polygon.
 function flashShade(idx) {
+  clearFlash();
   flashShadeIdx = idx;
-  if (flashShadeTimer) clearTimeout(flashShadeTimer);
-  flashShadeTimer = setTimeout(() => { flashShadeIdx = -1; draw(); }, 2600);
-  draw();
+  const s = state.shelters[idx];
+  const refNode = myLocation ? geoStartNode : startNode();
+  const target = (s && s.points && s.points.length >= 3) ? nearestNodeTo(polyCentroid(s.points)) : null;
+  const r = (refNode && target && state.nodes.has(refNode) && state.nodes.has(target)) ? dijkstra(refNode, target) : null;
+  flashRoute = r ? buildRoute(r.path) : null;
+  const BLINKS = 3, HALF = 260;                 // on/off half-cycle in ms
+  flashBlinkOn = true; draw();
+  for (let i = 1; i < BLINKS * 2; i++) flashTimers.push(setTimeout(() => { flashBlinkOn = (i % 2 === 0); draw(); }, i * HALF));
+  flashTimers.push(setTimeout(() => { flashShadeIdx = -1; flashRoute = null; draw(); }, BLINKS * 2 * HALF));
 }
 let shadePanelCollapsed = localStorage.getItem("ridesim.shadeCollapsed") === "1";
 function renderShadePanel() {
