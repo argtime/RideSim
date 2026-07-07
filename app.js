@@ -1011,8 +1011,6 @@ function draw(marker) {
     }
   }
 
-  drawShelters();   // shade / rain-cover overlay (part of the Heat layer), above the map
-
   // connections (part of the graph — hidden when graph is toggled off)
   if (showGraph) {
     ctx.lineWidth = 2; ctx.strokeStyle = "#2b3a57";
@@ -1169,6 +1167,9 @@ function draw(marker) {
     // indoor/outdoor ring
     if (showHeat) { const hf = heatRingFrac(a); if (hf != null) drawQueueSunArc(X, Y, radius, hf); }
   });
+
+  drawShelters();   // shade overlay (Heat layer) — above the icons, below labels/avatar
+
   if (hoverAttr) {
     const a = state.attractions.get(hoverAttr);
     if (a) drawAttrLabel(a);
