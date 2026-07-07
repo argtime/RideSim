@@ -1538,6 +1538,40 @@ function drawLLBadge(X, Y, r) {
   ctx.font = (br * 1.25).toFixed(1) + "px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillText("⚡", bx, by);
 }
+// Make a floating map panel draggable by its .ll-head. A small move counts as a
+// drag (repositions + remembers where); a plain click still runs onTap (collapse).
+// Re-callable each render (the header is rebuilt with innerHTML).
+function bindPanelDrag(el, key, onTap) {
+  // restore a saved position (once dragged, it stays put across reloads)
+  try {
+    const s = JSON.parse(localStorage.getItem(key) || "null");
+    if (s && isFinite(s.left) && isFinite(s.top)) { el.style.right = "auto"; el.style.left = s.left + "px"; el.style.top = s.top + "px"; }
+  } catch (e) {}
+  const head = el.querySelector(".ll-head"); if (!head) return;
+  head.style.touchAction = "none";
+  head.onpointerdown = (e) => {
+    if (e.button != null && e.button !== 0) return;
+    const par = el.offsetParent || el.parentElement;
+    const r = el.getBoundingClientRect(), pr = par.getBoundingClientRect();
+    const sx = e.clientX, sy = e.clientY, sl = r.left - pr.left, st = r.top - pr.top;
+    let moved = false;
+    el.style.right = "auto"; el.style.left = sl + "px"; el.style.top = st + "px";
+    try { head.setPointerCapture(e.pointerId); } catch (_) {}
+    head.onpointermove = (ev) => {
+      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+      if (!moved && Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+      if (!moved) return;
+      const nl = Math.max(0, Math.min(sl + dx, par.clientWidth - el.offsetWidth));
+      const nt = Math.max(0, Math.min(st + dy, par.clientHeight - el.offsetHeight));
+      el.style.left = nl + "px"; el.style.top = nt + "px";
+    };
+    head.onpointerup = () => {
+      head.onpointermove = null; head.onpointerup = null;
+      if (moved) { try { localStorage.setItem(key, JSON.stringify({ left: parseFloat(el.style.left), top: parseFloat(el.style.top) })); } catch (_) {} }
+      else if (onTap) onTap();   // no drag -> treat as a click (collapse)
+    };
+  };
+}
 // proximity-sorted panel of rides with an LL available now
 function renderLLPanel() {
   const el = document.getElementById("llPanel");
@@ -1575,12 +1609,11 @@ function renderLLPanel() {
   el.innerHTML = html;
   // tap the header to minimize the list down to just the title (keeps the map clear)
   el.classList.toggle("collapsed", llPanelCollapsed);
-  const head = el.querySelector(".ll-head");
-  if (head) head.onclick = () => {
+  bindPanelDrag(el, "ridesim.llPos", () => {
     llPanelCollapsed = !llPanelCollapsed;
     try { localStorage.setItem("ridesim.llCollapsed", llPanelCollapsed ? "1" : "0"); } catch (e) {}
     el.classList.toggle("collapsed", llPanelCollapsed);
-  };
+  });
 }
 
 /* ---------- Nearest shade panel (part of the Heat layer) ---------------- */
@@ -1671,12 +1704,11 @@ function renderShadePanel() {
   html += section("☂️", "Rain cover", build(s => s.cover || s.indoor), "you're under cover");
   el.innerHTML = html;
   el.classList.toggle("collapsed", shadePanelCollapsed);
-  const head = el.querySelector(".ll-head");
-  if (head) head.onclick = () => {
+  bindPanelDrag(el, "ridesim.shadePos", () => {
     shadePanelCollapsed = !shadePanelCollapsed;
     try { localStorage.setItem("ridesim.shadeCollapsed", shadePanelCollapsed ? "1" : "0"); } catch (e) {}
     el.classList.toggle("collapsed", shadePanelCollapsed);
-  };
+  });
   el.querySelectorAll(".shade-row").forEach(row => { row.onclick = () => flashShade(+row.dataset.idx); });
 }
 // Attribution for ThemeParks.wiki; shown whenever an overlay is on.
