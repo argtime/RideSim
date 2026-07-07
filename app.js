@@ -92,8 +92,11 @@ function seqIndexOf(id) { return state.sequence.findIndex(e => entryId(e) === id
 function catMeta(c) { return CAT_META[c] || CAT_META.ride; }
 // Which categories are shown in the picker / on the map (toggled by the chips).
 const catFilter = { ride: true, restaurant: true, shop: true, pin: true, restroom: true, other: true, transit: true };
-// order of the picker chips, used to (de)serialize "?cat=010101" (1 = shown)
+// picker chips in order, and the letters used to (de)serialize "?cat=RDSPBO":
+// Rides, Dining, Shops, Pins, Bathroom (restroom — R is taken), Other. Uppercase
+// = shown, lowercase = hidden.
 const CAT_ORDER = ["ride", "restaurant", "shop", "pin", "restroom", "other"];
+const CAT_LETTERS = ["R", "D", "S", "P", "B", "O"];
 
 
 
@@ -2345,19 +2348,22 @@ function syncPlanUrl() {
     const t = getPlanTitle();
     if (t) u.searchParams.set("title", t);
     else u.searchParams.delete("title");
-    const cat = CAT_ORDER.map(c => catFilter[c] ? "1" : "0").join("");
-    if (cat === "111111") u.searchParams.delete("cat");   // all shown = default, keep the URL clean
+    const cat = CAT_ORDER.map((c, i) => catFilter[c] ? CAT_LETTERS[i] : CAT_LETTERS[i].toLowerCase()).join("");
+    if (cat === "RDSPBO") u.searchParams.delete("cat");   // all shown = default, keep the URL clean
     else u.searchParams.set("cat", cat);
     // panels/overlays: only once the user has touched one (else defaults stand)
     if (panTouched) u.searchParams.set("pan", panParam());
     history.replaceState(null, "", u.toString());
   } catch (e) {}
 }
-// Apply a "?cat=010101" value to the category filters + chips. Returns true if present.
+// Apply a "?cat=RDSPBO" value to the category filters + chips (also accepts the
+// old "010101" form). Returns true if present.
 function loadCatParam() {
   const v = new URLSearchParams(location.search).get("cat");
-  if (!v || !/^[01]{6}$/.test(v)) return false;
-  CAT_ORDER.forEach((c, i) => { catFilter[c] = v[i] === "1"; });
+  if (!v) return false;
+  if (/^[01]{6}$/.test(v)) CAT_ORDER.forEach((c, i) => { catFilter[c] = v[i] === "1"; });
+  else if (/^[rR][dD][sS][pP][bB][oO]$/.test(v)) CAT_ORDER.forEach((c, i) => { catFilter[c] = v[i] === v[i].toUpperCase(); });
+  else return false;
   document.querySelectorAll("#attrFilter .chip").forEach(chip => {
     if (chip.dataset.cat in catFilter) chip.classList.toggle("active", catFilter[chip.dataset.cat]);
   });
