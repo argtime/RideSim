@@ -840,7 +840,9 @@ SAMPLE.attractions = [
   { "id": "adventureland_frozen_treats", "name": "Adventureland Frozen Treats", "entranceNodeId": "node15", "exitNodeId": "node15", "displayLocation": { "x": 464, "y": 890 }, "rideDuration": 5, "category": "restaurant", "accessNodeIds": ["node15", "node18"], "rInside": true },
   { "id": "island_supply", "name": "Island Supply", "entranceNodeId": "node22", "exitNodeId": "node22", "displayLocation": { "x": 563, "y": 757 }, "rideDuration": 5, "category": "shop", "accessNodeIds": ["node22", "node25"], "rInside": true },
   { "id": "main_st_bakery", "name": "Main St Bakery", "entranceNodeId": "node92", "exitNodeId": "node92", "displayLocation": { "x": 1003, "y": 1042 }, "rideDuration": 5, "category": "restaurant", "rInside": true },
-  { "id": "guest_services", "name": "Guest Services", "entranceNodeId": "node69", "exitNodeId": "node69", "displayLocation": { "x": 876, "y": 1186 }, "rideDuration": 5, "category": "other", "rInside": false }
+  { "id": "guest_services", "name": "Guest Services", "entranceNodeId": "node69", "exitNodeId": "node69", "displayLocation": { "x": 876, "y": 1186 }, "rideDuration": 5, "category": "other", "rInside": false },
+  { "id": "main_st_popcorn_w", "name": "Main St Popcorn W", "entranceNodeId": "node68", "exitNodeId": "node68", "displayLocation": { "x": 910, "y": 1240 }, "rideDuration": 5, "category": "restaurant", "accessNodeIds": ["node68", "node64"], "rInside": true },
+  { "id": "main_st_popcorn_e", "name": "Main St Popcorn E", "entranceNodeId": "node127", "exitNodeId": "node127", "displayLocation": { "x": 1032, "y": 1239 }, "rideDuration": 5, "category": "restaurant", "accessNodeIds": ["node127", "node120"], "rInside": true }
 ];
 // @RIDESIM:ATTR:END
 
