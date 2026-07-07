@@ -183,7 +183,8 @@
   .shade-panel { left: 12px; right: auto; top: 120px; }
   .shade-panel .ll-head { color: #2ecc71; }
   .shade-panel .ll-sub { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
-  .shade-panel.collapsed .ll-sub { display: none; }
+  .shade-panel .sec-title { margin-top: 6px; color: var(--text); font-weight: 700; font-size: 11px; }
+  .shade-panel.collapsed .ll-sub, .shade-panel.collapsed .sec-title { display: none; }
   .shade-panel .ll-row { cursor: pointer; }
   .shade-panel .ll-dist { color: #2ecc71; }
   .nowplaying {

@@ -392,6 +392,28 @@ function dijkstra(start, goal) {
   path.unshift(start);
   return { path, dist: distTo.get(goal), edges };
 }
+// Single-source shortest paths: walking distance (px) from `start` to every node,
+// in one pass. Used to rank many destinations (e.g. shelter polygons) at once.
+function dijkstraAll(start) {
+  const distTo = new Map();
+  if (!state.nodes.has(start)) return distTo;
+  state.nodes.forEach((_, id) => distTo.set(id, Infinity));
+  distTo.set(start, 0);
+  const visited = new Set(), pq = [{ id: start, d: 0 }];
+  while (pq.length) {
+    let bi = 0;
+    for (let i = 1; i < pq.length; i++) if (pq[i].d < pq[bi].d) bi = i;
+    const cur = pq.splice(bi, 1)[0].id;
+    if (visited.has(cur)) continue;
+    visited.add(cur);
+    for (const e of (state.adj.get(cur) || [])) {
+      if (visited.has(e.to)) continue;
+      const nd = distTo.get(cur) + e.dist;
+      if (nd < distTo.get(e.to)) { distTo.set(e.to, nd); pq.push({ id: e.to, d: nd }); }
+    }
+  }
+  return distTo;
+}
 
 /* ---------- Walk time & wait interpolation ------------------------------ */
 function ftPerPx() { return parseFloat(document.getElementById("ftPerPx").value) || 4; }
@@ -1234,13 +1256,14 @@ function drawShelters() {
   if (!showHeat || !state.shelters || !state.shelters.length) return;
   ctx.save();
   state.shelters.forEach((s, idx) => {
-    const pts = s.points;
-    if (!s.shade || !pts || pts.length < 3) return;
+    const pts = s.points, isFlash = idx === flashShadeIdx;
+    if (!pts || pts.length < 3) return;
+    if (!s.shade && !isFlash) return;            // shade gets a fill; other types only drawn to flash
     ctx.beginPath();
     pts.forEach((p, i) => { i ? ctx.lineTo(tx(p.x), ty(p.y)) : ctx.moveTo(tx(p.x), ty(p.y)); });
     ctx.closePath();
-    ctx.globalAlpha = 0.5; ctx.fillStyle = SHADE_COLOR; ctx.fill();
-    if (idx === flashShadeIdx) {                 // a tapped shade row: bright outline
+    if (s.shade) { ctx.globalAlpha = 0.5; ctx.fillStyle = SHADE_COLOR; ctx.fill(); }
+    if (isFlash) {                               // a tapped shelter row: bright outline
       ctx.globalAlpha = 1; ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
     }
   });
@@ -1611,26 +1634,41 @@ function flashShade(idx) {
 let shadePanelCollapsed = localStorage.getItem("ridesim.shadeCollapsed") === "1";
 function renderShadePanel() {
   const el = document.getElementById("shadePanel"); if (!el) return;
-  const shades = (state.shelters || [])
-    .map((s, i) => ({ s: s, i: i }))
-    .filter(o => o.s.shade && o.s.points && o.s.points.length >= 3);
   const ref = currentRefPoint();
-  if (!showHeat || !shades.length || !ref) { el.style.display = "none"; return; }
+  const shelters = state.shelters || [];
+  const hasAny = shelters.some(s => s.points && s.points.length >= 3 && (s.shade || s.cover || s.indoor));
+  if (!showHeat || !ref || !hasAny) { el.style.display = "none"; return; }
   el.style.display = "block";
-  const rows = shades.map(o => ({
-    idx: o.i,
-    dist: polyDistPx(ref, o.s.points),
-    near: nearestAttrName(polyCentroid(o.s.points))
-  })).sort((a, b) => a.dist - b.dist);
+  // one shortest-path pass from where you are, then rank each polygon by the
+  // walking distance to its nearest node (0 if you're already inside it).
+  const refNode = myLocation ? geoStartNode : startNode();
+  const distMap = (refNode && state.nodes.has(refNode)) ? dijkstraAll(refNode) : null;
+  const shelterDist = (poly) => {
+    if (pointInPoly(ref, poly)) return 0;
+    if (distMap) { const d = distMap.get(nearestNodeTo(polyCentroid(poly))); if (d != null && isFinite(d)) return d; }
+    return polyDistPx(ref, poly);   // fallback: straight-line if unrouteable
+  };
+  const build = (pred) => shelters
+    .map((s, i) => ({ s: s, i: i }))
+    .filter(o => o.s.points && o.s.points.length >= 3 && pred(o.s))
+    .map(o => ({ idx: o.i, dist: shelterDist(o.s.points), near: nearestAttrName(polyCentroid(o.s.points)) }))
+    .sort((a, b) => a.dist - b.dist);
+  const section = (icon, title, rows, inLabel) => {
+    if (!rows.length) return "";
+    let h = '<div class="ll-sub sec-title">' + icon + " " + title + "</div>";
+    rows.slice(0, 4).forEach(r => {
+      const label = r.dist === 0 ? inLabel : "near " + esc(r.near || "?");
+      const dist = r.dist === 0 ? "◆" : fmtFeet(r.dist * ftPerPx());
+      h += '<div class="ll-row shade-row" data-idx="' + r.idx + '"><span class="ll-nm">' + label + '</span>' +
+        '<span class="ll-dist">' + dist + '</span></div>';
+    });
+    return h;
+  };
   const src = myLocation ? "your location" : "the start";
-  let html = '<div class="ll-head">🌳 Nearest shade<span class="ll-caret">▾</span></div>';
-  html += '<div class="ll-sub">from ' + src + '</div>';
-  rows.slice(0, 6).forEach(r => {
-    const label = r.dist === 0 ? "you're in shade here" : "near " + esc(r.near || "?");
-    const dist = r.dist === 0 ? "◆" : fmtFeet(r.dist * ftPerPx());
-    html += '<div class="ll-row shade-row" data-idx="' + r.idx + '"><span class="ll-nm">' + label + '</span>' +
-      '<span class="ll-dist">' + dist + '</span></div>';
-  });
+  let html = '<div class="ll-head">⛱ Shelter — nearest<span class="ll-caret">▾</span></div>';
+  html += '<div class="ll-sub">from ' + src + " · walking</div>";
+  html += section("🌳", "Shade", build(s => s.shade), "you're in shade");
+  html += section("☂️", "Rain cover", build(s => s.cover || s.indoor), "you're under cover");
   el.innerHTML = html;
   el.classList.toggle("collapsed", shadePanelCollapsed);
   const head = el.querySelector(".ll-head");
