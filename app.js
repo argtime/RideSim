@@ -607,7 +607,7 @@ function fetchWeather() {
     const c = (d && d.current) || {};
     lastUv = (typeof c.uv_index === "number" && isFinite(c.uv_index)) ? c.uv_index : null;
     renderUvBadge();
-    renderWeatherAlert(scanRain(d.minutely_15), scanStorm(d.hourly, c.weather_code));
+    renderWeatherAlert(scanRainWindow(d.minutely_15), scanStorm(d.hourly, c.weather_code));
     const feels = c.apparent_temperature;
     if (typeof feels === "number" && isFinite(feels)) {
       const air = c.temperature_2m;
@@ -624,19 +624,29 @@ function fetchWeather() {
 }
 // WMO thunderstorm codes.
 function isStormCode(wc) { return wc === 95 || wc === 96 || wc === 99; }
-// First 15-min slot in the next ~3h where measurable rain is forecast (or a high
-// chance). Returns { iso, mins, prob } or null.
-function scanRain(mn) {
+// Rain window from the minutely-15 forecast: when it starts, a best-guess end,
+// and the duration. { startMins, endMins, durMins, startIso, prob, truncated, open }.
+function scanRainWindow(mn) {
   if (!mn || !mn.time) return null;
   const now = Date.now(), precip = mn.precipitation || [], prob = mn.precipitation_probability || [];
+  const wet = i => (precip[i] >= 0.1) || (prob[i] >= 60);
+  let s = -1;
   for (let i = 0; i < mn.time.length; i++) {
     const t = new Date(mn.time[i]).getTime();
-    if (t < now - 8 * 60000) continue;          // ignore slots already past
-    if (t > now + 180 * 60000) break;           // look ~3h ahead
-    const wet = (precip[i] >= 0.1) || (prob[i] >= 60);
-    if (wet) return { iso: mn.time[i], mins: Math.max(0, Math.round((t - now) / 60000)), prob: prob[i] };
+    if (t < now - 8 * 60000) continue;
+    if (t > now + 180 * 60000) break;
+    if (wet(i)) { s = i; break; }
   }
-  return null;
+  if (s < 0) return null;
+  let e = s;
+  while (e + 1 < mn.time.length && wet(e + 1)) e++;    // extend through consecutive wet slots
+  const startMs = new Date(mn.time[s]).getTime();
+  const endMs = new Date(mn.time[e]).getTime() + 15 * 60000;
+  return {
+    startIso: mn.time[s], startMins: Math.max(0, Math.round((startMs - now) / 60000)),
+    endMins: Math.max(0, Math.round((endMs - now) / 60000)), durMins: Math.max(15, Math.round((endMs - startMs) / 60000)),
+    prob: prob[s], truncated: (e === mn.time.length - 1), open: startMs <= now
+  };
 }
 // Thunderstorm in the current conditions or the next few hours. { iso, mins, now }.
 function scanStorm(hr, currentCode) {
@@ -656,17 +666,101 @@ function alertWhen(x) {
   if (!x || x.now || x.mins <= 5) return "now";
   return "~" + tCompactFromISO(x.iso) + " (" + x.mins + "m)";
 }
-function renderWeatherAlert(rain, storm) {
+// Clock label for a time N minutes from now, e.g. "3.40p".
+function clockFromNow(mins) {
+  const d = new Date(Date.now() + Math.round(mins) * 60000);
+  const h = d.getHours(), m = d.getMinutes(), ap = h < 12 ? "a" : "p", hh = h % 12 || 12;
+  return hh + (m ? "." + String(m).padStart(2, "0") : "") + ap;
+}
+function pointInAnyCover(pt) {
+  return (state.shelters || []).some(s => (s.cover || s.indoor) && s.points && s.points.length >= 3 && pointInPoly(pt, s.points));
+}
+// A ride that keeps you dry: is its queue (entrance) under cover, and the ride
+// itself indoor/covered?
+function rideRainInfo(a) {
+  if (attrCat(a) !== "ride") return null;
+  const ent = state.nodes.get(a.entranceNodeId); if (!ent) return null;
+  const disp = a.displayLocation || ent;
+  return { queueCovered: pointInAnyCover(ent), rideCovered: a.rInside === true || pointInAnyCover(disp) };
+}
+// Rides whose covered queue + ride could span the rain: reachable before it
+// starts, ideally with enough covered time to step out around when it ends.
+function rainSuggestions(win) {
+  if (!win) return [];
+  const ref = currentRefPoint(); if (!ref) return [];
+  const refNode = myLocation ? geoStartNode : startNode();
+  const distMap = (refNode && state.nodes.has(refNode)) ? dijkstraAll(refNode) : null;
+  const d = new Date(), nowDayMin = d.getHours() * 60 + d.getMinutes();
+  const out = [];
+  state.attractions.forEach(a => {
+    const info = rideRainInfo(a);
+    if (!info || !info.queueCovered || !info.rideCovered) return;   // must stay dry: queue AND ride
+    const distPx = distMap ? distMap.get(a.entranceNodeId) : null;
+    if (distPx == null || !isFinite(distPx)) return;
+    const walkMin = walkTimeMin(distPx);
+    const wait = Math.max(0, Math.round(waitFor(a, nowDayMin + walkMin) || 0));
+    const coveredMin = wait + attrDuration(a);
+    out.push({
+      id: a.id, name: a.name, walkMin: walkMin, coveredMin: coveredMin,
+      arriveSlack: win.startMins - walkMin,          // >=0: reach it before the rain
+      exitMin: walkMin + coveredMin                  // minutes from now you'd step out
+    });
+  });
+  const rainEnd = win.startMins + win.durMins;
+  out.forEach(o => {
+    const reachable = o.arriveSlack >= -5 ? 0 : 1;   // 0 = can make it before/at rain start
+    const spans = o.coveredMin >= win.durMins ? 0 : 1;
+    o._score = reachable * 1e6 + spans * 1e3 + o.walkMin + Math.abs(o.exitMin - rainEnd) * 0.5;
+  });
+  return out.sort((a, b) => a._score - b._score);
+}
+let weatherAlertOpen = false;
+function renderWeatherAlert(win, storm) {
   const el = document.getElementById("weatherAlert"); if (!el) return;
-  let cls = "", txt = "";
-  if (storm) { cls = "storm"; txt = "⛈ Thunderstorm " + alertWhen(storm) + " — take cover"; }
-  else if (rain) { cls = "rain"; txt = "🌧 Rain " + alertWhen(rain) + (rain.prob >= 0 ? " · " + Math.round(rain.prob) + "%" : ""); }
-  if (!txt) { el.style.display = "none"; return; }
-  el.className = "weather-alert " + cls;
-  el.style.display = "flex";
-  el.textContent = txt;
-  el.title = "Tap to flash the nearest cover";
-  el.onclick = flashNearestCover;
+  let cls = "", head = "";
+  if (storm) { cls = "storm"; head = "⛈ Thunderstorm " + alertWhen(storm) + " — take cover"; }
+  else if (win) { cls = "rain"; head = "🌧 Rain " + (win.open ? "now" : clockFromNow(win.startMins)) + " · " + win.durMins + (win.truncated ? "+" : "") + "m"; }
+  if (!head) { el.style.display = "none"; el._win = el._storm = null; return; }
+  el._win = win; el._storm = storm;
+  el.className = "weather-alert " + cls + (weatherAlertOpen ? " open" : "");
+  el.style.display = "block";
+  let html = '<div class="wa-head">' + head + '<span class="wa-caret">' + (weatherAlertOpen ? "▴" : "▾") + '</span></div>';
+  if (weatherAlertOpen) {
+    html += '<div class="wa-body">';
+    if (win) {
+      html += '<div class="wa-win">Rain ' + (win.open ? "now" : clockFromNow(win.startMins)) + "–" + clockFromNow(win.endMins) + (win.truncated ? "+" : "") + " (~" + win.durMins + (win.truncated ? "+" : "") + " min)</div>";
+      const sug = rainSuggestions(win).slice(0, 3);
+      if (sug.length) {
+        html += '<div class="wa-sub">Wait it out — covered queue + ride:</div>';
+        sug.forEach(s => {
+          const covers = s.coveredMin >= win.durMins, ok = s.arriveSlack >= -5;
+          html += '<div class="wa-row" data-id="' + esc(s.id) + '"><span class="wa-nm">' + esc(s.name) +
+            (covers ? " ✓" : "") + '</span><span class="wa-meta">' + Math.round(s.coveredMin) + "m dry · reach " + clockFromNow(s.walkMin) +
+            (ok ? "" : " (late)") + " · out " + clockFromNow(s.exitMin) + "</span></div>";
+        });
+      } else {
+        html += '<div class="wa-sub">No fully-covered ride reachable in time.</div>';
+      }
+    }
+    html += '<div class="wa-row" data-cover="1"><span class="wa-nm">📍 Flash nearest cover</span></div>';
+    html += "</div>";
+  }
+  el.innerHTML = html;
+  const h = el.querySelector(".wa-head");
+  if (h) h.onclick = () => { weatherAlertOpen = !weatherAlertOpen; renderWeatherAlert(el._win, el._storm); };
+  el.querySelectorAll(".wa-row").forEach(row => {
+    row.onclick = () => { if (row.dataset.cover) flashNearestCover(); else flashRide(row.dataset.id); };
+  });
+}
+// Briefly ring an attraction on the map (used by rain suggestions).
+let flashLoc = null, flashLocTimer = null;
+function flashRide(id) {
+  const a = state.attractions.get(id); if (!a) return;
+  const loc = a.displayLocation || state.nodes.get(a.entranceNodeId); if (!loc) return;
+  flashLoc = loc;
+  if (flashLocTimer) clearTimeout(flashLocTimer);
+  flashLocTimer = setTimeout(() => { flashLoc = null; draw(); }, 3200);
+  draw();
 }
 // Flash the closest rain-cover polygon on the map (turns Heat on if it's off so
 // the flash is visible), from where you are.
@@ -1277,6 +1371,12 @@ function draw(marker) {
       ctx.beginPath(); ctx.arc(tx(loc.x), ty(loc.y), attrSize().r + 6, 0, 7);
       ctx.lineWidth = 2.5; ctx.strokeStyle = "#ffcc4d"; ctx.stroke();
     }
+  }
+
+  // rain-suggestion flash: a bright ring on a suggested ride
+  if (flashLoc) {
+    ctx.beginPath(); ctx.arc(tx(flashLoc.x), ty(flashLoc.y), attrSize().r + 8, 0, 7);
+    ctx.lineWidth = 3; ctx.strokeStyle = "#5cc8ff"; ctx.stroke();
   }
 
   // marker

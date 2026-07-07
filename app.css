@@ -188,15 +188,28 @@
   .shade-panel.collapsed .ll-sub, .shade-panel.collapsed .sec-title { display: none; }
   .shade-panel .ll-row { cursor: pointer; }
   .shade-panel .ll-dist { color: #2ecc71; }
-  /* rain / thunderstorm alert, top-center */
+  /* rain / thunderstorm alert, top-center; header is a pill, expands to suggestions */
   .weather-alert {
     position: absolute; top: 54px; left: 50%; transform: translateX(-50%); display: none;
-    align-items: center; gap: 8px; white-space: nowrap; cursor: pointer; z-index: 5;
-    border-radius: 18px; padding: 6px 14px; font-size: 13px; font-weight: 600; color: #fff;
+    z-index: 5; border-radius: 14px; color: #fff; max-width: min(340px, 80%);
     border: 1px solid var(--border); box-shadow: 0 4px 14px rgba(0,0,0,.4);
   }
-  .weather-alert.rain { background: rgba(41,98,160,.94); border-color: #5cc8ff; }
-  .weather-alert.storm { background: rgba(150,30,30,.95); border-color: #ff6b6b; }
+  .weather-alert.rain { background: rgba(41,98,160,.96); border-color: #5cc8ff; }
+  .weather-alert.storm { background: rgba(150,30,30,.96); border-color: #ff6b6b; }
+  .weather-alert .wa-head {
+    display: flex; align-items: center; gap: 8px; white-space: nowrap; cursor: pointer;
+    padding: 6px 14px; font-size: 13px; font-weight: 700;
+  }
+  .weather-alert .wa-caret { margin-left: auto; font-size: 10px; }
+  .weather-alert .wa-body { padding: 0 12px 8px; font-size: 12px; }
+  .weather-alert .wa-win { font-weight: 600; padding: 2px 0 4px; opacity: .95; }
+  .weather-alert .wa-sub { font-size: 11px; opacity: .8; margin: 2px 0; }
+  .weather-alert .wa-row {
+    display: flex; flex-wrap: wrap; gap: 0 8px; padding: 4px 0; cursor: pointer;
+    border-top: 1px solid rgba(255,255,255,.18);
+  }
+  .weather-alert .wa-nm { flex: 1 1 100%; font-weight: 600; }
+  .weather-alert .wa-meta { flex: 1 1 100%; font-size: 11px; opacity: .85; }
   .nowplaying {
     position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
     background: rgba(16,22,36,.9); border: 1px solid var(--border); border-radius: 20px;
