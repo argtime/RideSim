@@ -107,6 +107,12 @@
   }
   .attr-filter .chip.active { opacity: 1; border-color: var(--accent); }
   .attr-filter .chip .swatch { width: 9px; height: 9px; border-radius: 50%; display: inline-block; vertical-align: -1px; margin-right: 4px; }
+  .attr-search {
+    display: block; margin: 0 12px 8px; padding: 6px 9px; font-size: 13px; border-radius: 7px;
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+  }
+  .attr-search::placeholder { color: var(--muted); }
+  .attr-search:focus { outline: none; border-color: var(--accent); }
 
   /* canvas wrap */
   .canvas-wrap { position: relative; flex: 1; min-height: 0; background:
