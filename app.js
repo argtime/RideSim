@@ -714,6 +714,42 @@ function rainSuggestions(win) {
   });
   return out.sort((a, b) => a._score - b._score);
 }
+// Greedy chain of covered rides to span the whole rain: from where you are, keep
+// hopping to the nearest not-yet-used covered ride (shortest exposed dash) until
+// the accumulated dry time reaches the end of the rain. Returns { rides, coversEnd,
+// endExit, exposedMin } or null.
+function rainChain(win) {
+  if (!win) return null;
+  let node = myLocation ? geoStartNode : startNode();
+  if (!node || !state.nodes.has(node)) return null;
+  const d = new Date(), nowDayMin = d.getHours() * 60 + d.getMinutes();
+  const rainStart = win.startMins, rainEnd = win.startMins + win.durMins;
+  const used = new Set(), chain = [];
+  let clock = 0, exposed = 0;
+  for (let step = 0; step < 5; step++) {
+    const distMap = dijkstraAll(node);
+    let best = null;
+    state.attractions.forEach(a => {
+      if (used.has(a.id)) return;
+      const info = rideRainInfo(a); if (!info || !info.queueCovered || !info.rideCovered) return;
+      const dpx = distMap.get(a.entranceNodeId); if (dpx == null || !isFinite(dpx)) return;
+      const walkMin = walkTimeMin(dpx);
+      if (!best || walkMin < best.walkMin) best = { a: a, walkMin: walkMin };
+    });
+    if (!best) break;
+    const a = best.a, arrive = clock + best.walkMin;
+    const wait = Math.max(0, Math.round(waitFor(a, nowDayMin + arrive) || 0));
+    const exit = arrive + wait + attrDuration(a);
+    exposed += Math.max(0, Math.min(arrive, rainEnd) - Math.max(clock, rainStart));   // walk gap inside the rain
+    chain.push({ id: a.id, name: a.name, arrive: arrive, exit: exit });
+    used.add(a.id);
+    node = (a.exitNodeId && state.nodes.has(a.exitNodeId)) ? a.exitNodeId : a.entranceNodeId;
+    clock = exit;
+    if (exit >= rainEnd) break;
+  }
+  if (chain.length < 2) return null;   // a single ride is already covered by the list above
+  return { rides: chain, coversEnd: clock >= rainEnd, endExit: clock, exposedMin: Math.round(exposed) };
+}
 let weatherAlertOpen = false;
 function renderWeatherAlert(win, storm) {
   const el = document.getElementById("weatherAlert"); if (!el) return;
@@ -741,6 +777,14 @@ function renderWeatherAlert(win, storm) {
       } else {
         html += '<div class="wa-sub">No fully-covered ride reachable in time.</div>';
       }
+      const chain = rainChain(win);
+      el._chain = chain ? chain.rides.map(r => r.id) : null;
+      if (chain) {
+        html += '<div class="wa-sub">Chain to stay dry:</div>';
+        html += '<div class="wa-row wa-chain" data-chain="1"><span class="wa-nm">' + chain.rides.map(r => esc(r.name)).join(" → ") + '</span>' +
+          '<span class="wa-meta">' + (chain.coversEnd ? "covers the rain · out " + clockFromNow(chain.endExit) : "dry through " + clockFromNow(chain.endExit)) +
+          " · ~" + chain.exposedMin + "m in the wet</span></div>";
+      }
     }
     html += '<div class="wa-row" data-cover="1"><span class="wa-nm">📍 Flash nearest cover</span></div>';
     html += "</div>";
@@ -749,18 +793,25 @@ function renderWeatherAlert(win, storm) {
   const h = el.querySelector(".wa-head");
   if (h) h.onclick = () => { weatherAlertOpen = !weatherAlertOpen; renderWeatherAlert(el._win, el._storm); };
   el.querySelectorAll(".wa-row").forEach(row => {
-    row.onclick = () => { if (row.dataset.cover) flashNearestCover(); else flashRide(row.dataset.id); };
+    row.onclick = () => {
+      if (row.dataset.cover) flashNearestCover();
+      else if (row.dataset.chain) flashChain(el._chain || []);
+      else flashRide(row.dataset.id);
+    };
   });
 }
-// Briefly ring an attraction on the map (used by rain suggestions).
-let flashLoc = null, flashLocTimer = null;
-function flashRide(id) {
-  const a = state.attractions.get(id); if (!a) return;
-  const loc = a.displayLocation || state.nodes.get(a.entranceNodeId); if (!loc) return;
-  flashLoc = loc;
+// Briefly ring one or more attractions on the map (used by rain suggestions).
+let flashLocs = null, flashLocTimer = null;
+function flashPts(pts) {
+  flashLocs = (pts || []).filter(Boolean);
   if (flashLocTimer) clearTimeout(flashLocTimer);
-  flashLocTimer = setTimeout(() => { flashLoc = null; draw(); }, 3200);
+  flashLocTimer = setTimeout(() => { flashLocs = null; draw(); }, 3600);
   draw();
+}
+function attrLoc(id) { const a = state.attractions.get(id); return a && (a.displayLocation || state.nodes.get(a.entranceNodeId)); }
+function flashRide(id) { const loc = attrLoc(id); if (loc) flashPts([{ x: loc.x, y: loc.y }]); }
+function flashChain(ids) {
+  flashPts(ids.map((id, i) => { const l = attrLoc(id); return l ? { x: l.x, y: l.y, n: i + 1 } : null; }));
 }
 // Flash the closest rain-cover polygon on the map (turns Heat on if it's off so
 // the flash is visible), from where you are.
@@ -1373,10 +1424,19 @@ function draw(marker) {
     }
   }
 
-  // rain-suggestion flash: a bright ring on a suggested ride
-  if (flashLoc) {
-    ctx.beginPath(); ctx.arc(tx(flashLoc.x), ty(flashLoc.y), attrSize().r + 8, 0, 7);
-    ctx.lineWidth = 3; ctx.strokeStyle = "#5cc8ff"; ctx.stroke();
+  // rain-suggestion flash: bright ring(s) on suggested ride(s), numbered for a chain
+  if (flashLocs) {
+    const rr = attrSize().r + 8;
+    flashLocs.forEach(p => {
+      ctx.beginPath(); ctx.arc(tx(p.x), ty(p.y), rr, 0, 7);
+      ctx.lineWidth = 3; ctx.strokeStyle = "#5cc8ff"; ctx.stroke();
+      if (p.n) {
+        ctx.beginPath(); ctx.arc(tx(p.x) + rr, ty(p.y) - rr, 7, 0, 7);
+        ctx.fillStyle = "#5cc8ff"; ctx.fill();
+        ctx.fillStyle = "#08263a"; ctx.font = "bold 10px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(String(p.n), tx(p.x) + rr, ty(p.y) - rr);
+      }
+    });
   }
 
   // marker
