@@ -1408,10 +1408,10 @@ function draw(marker) {
     }
     if ((liveShow || ll) && inSeq >= 0) drawSeqBadge(X, Y, radius, inSeq + 1);  // keep order visible
     ctx.globalAlpha = 1;
-    if (ll) drawLLBadge(X, Y, radius);            // ⚡ bolt at the bottom of LL rides
     // sun/shade heat ring: rides show the queue split, restaurants/shops a solid
     // indoor/outdoor ring
     if (showHeat) { const hf = heatRingFrac(a); if (hf != null) drawQueueSunArc(X, Y, radius, hf); }
+    if (ll) drawLLBadge(X, Y, radius);            // ⚡ bolt at the bottom — on top of the heat ring
   });
 
   drawShelters("over");   // pink shade (panel expanded) + flashes — above the icons, below labels/avatar
