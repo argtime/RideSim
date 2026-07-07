@@ -1979,20 +1979,21 @@ function updateLiveCredit() {
 }
 
 /* ---------- UI: attraction picker --------------------------------------- */
-// Live name filter: every whitespace-separated search term must be a substring of
-// some whitespace-separated part of the name. So "thun bi" matches "Big Thunder".
+// Live filter: every search term must be a substring of some word of the target
+// text (the name plus the id, split on spaces and underscores). So "thun bi"
+// matches "Big Thunder", and "big_th" matches via the id.
 let attrSearch = "";
-function matchSearch(name) {
+function matchSearch(text) {
   const q = attrSearch.trim().toLowerCase();
   if (!q) return true;
-  const parts = String(name || "").toLowerCase().split(/\s+/).filter(Boolean);
-  return q.split(/\s+/).filter(Boolean).every(term => parts.some(p => p.indexOf(term) >= 0));
+  const parts = String(text || "").toLowerCase().split(/[\s_]+/).filter(Boolean);
+  return q.split(/[\s_]+/).filter(Boolean).every(term => parts.some(p => p.indexOf(term) >= 0));
 }
 function renderAttrList() {
   const el = document.getElementById("attrList");
   el.innerHTML = "";
   const sorted = Array.from(state.attractions.values())
-    .filter(a => catFilter[attrCat(a)] && matchSearch(a.name))
+    .filter(a => catFilter[attrCat(a)] && matchSearch(a.name + " " + a.id))
     .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id, undefined, { sensitivity: "base", numeric: true }));
   sorted.forEach(a => {
     const div = document.createElement("div");
@@ -2012,7 +2013,7 @@ function renderAttrList() {
   });
   // transport lines — add as explicit "ride it" stops (board nearest, alight auto)
   (state.transport || []).forEach(line => {
-    if (!catFilter.transit || !matchSearch(line.name || line.id)) return;
+    if (!catFilter.transit || !matchSearch((line.name || "") + " " + (line.id || ""))) return;
     const div = document.createElement("div");
     div.className = "attr-item";
     div.innerHTML = '<span class="dot" style="background:' + TRANSIT_COLOR + '"></span>' +
@@ -3292,8 +3293,11 @@ document.querySelectorAll("#attrFilter .chip").forEach(chip => {
     renderAttrList(); draw(); syncPlanUrl();   // remember the visibility in the URL
   };
 });
-// live text filter (no URL persistence — it's transient)
-{ const sb = document.getElementById("attrSearch"); if (sb) sb.oninput = () => { attrSearch = sb.value; renderAttrList(); }; }
+// live text filter (no URL persistence — it's transient); Esc clears it
+{ const sb = document.getElementById("attrSearch"); if (sb) {
+  sb.oninput = () => { attrSearch = sb.value; renderAttrList(); };
+  sb.onkeydown = (e) => { if (e.key === "Escape") { sb.value = ""; attrSearch = ""; renderAttrList(); } };
+} }
 canvas.addEventListener("mousedown", bgDown);
 window.addEventListener("mousemove", bgMove);
 window.addEventListener("mouseup", bgUp);
