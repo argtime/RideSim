@@ -92,6 +92,8 @@ function seqIndexOf(id) { return state.sequence.findIndex(e => entryId(e) === id
 function catMeta(c) { return CAT_META[c] || CAT_META.ride; }
 // Which categories are shown in the picker / on the map (toggled by the chips).
 const catFilter = { ride: true, restaurant: true, shop: true, pin: true, restroom: true, other: true, transit: true };
+// order of the picker chips, used to (de)serialize "?cat=010101" (1 = shown)
+const CAT_ORDER = ["ride", "restaurant", "shop", "pin", "restroom", "other"];
 
 
 
@@ -2343,8 +2345,21 @@ function syncPlanUrl() {
     const t = getPlanTitle();
     if (t) u.searchParams.set("title", t);
     else u.searchParams.delete("title");
+    const cat = CAT_ORDER.map(c => catFilter[c] ? "1" : "0").join("");
+    if (cat === "111111") u.searchParams.delete("cat");   // all shown = default, keep the URL clean
+    else u.searchParams.set("cat", cat);
     history.replaceState(null, "", u.toString());
   } catch (e) {}
+}
+// Apply a "?cat=010101" value to the category filters + chips. Returns true if present.
+function loadCatParam() {
+  const v = new URLSearchParams(location.search).get("cat");
+  if (!v || !/^[01]{6}$/.test(v)) return false;
+  CAT_ORDER.forEach((c, i) => { catFilter[c] = v[i] === "1"; });
+  document.querySelectorAll("#attrFilter .chip").forEach(chip => {
+    if (chip.dataset.cat in catFilter) chip.classList.toggle("active", catFilter[chip.dataset.cat]);
+  });
+  return true;
 }
 /* ---------- Master refresh ---------------------------------------------- */
 function refresh() {
@@ -3226,7 +3241,7 @@ document.querySelectorAll("#attrFilter .chip").forEach(chip => {
     const cat = chip.dataset.cat;
     catFilter[cat] = !catFilter[cat];
     chip.classList.toggle("active", catFilter[cat]);
-    renderAttrList(); draw();
+    renderAttrList(); draw(); syncPlanUrl();   // remember the visibility in the URL
   };
 });
 canvas.addEventListener("mousedown", bgDown);
@@ -3402,6 +3417,7 @@ function init() {
   loadSample();
   setStartNow();          // default the day to the current time
   loadPlanParam();        // a shared "?plan=" link overrides start + sequence
+  loadCatParam();         // "?cat=010101" overrides which categories are shown
   resizeCanvas();
   refresh();
   // one live feed (ThemeParks.wiki) powers waits + LL; fetch once attractions exist
