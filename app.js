@@ -1474,11 +1474,17 @@ function drawSadFace(cx, cy, r, color) {
 // Shelter overlay, drawn as part of the Heat layer: shaded areas as a light fill
 // plus a defined outline so the region reads even over the (already green) map.
 // Rain-cover and indoor polygons come later, with the rain features.
-const SHADE_COLOR = "#ff1a8c";   // hot pink — stands out against the map
+const SHADE_GRAY = "#808080";   // subtle shade fill when Heat is on but the shelter panel is collapsed
+const SHADE_PINK = "#ff1a8c";   // prominent shade fill while the shelter panel is expanded
 function drawShelters() {
   if (!state.shelters || !state.shelters.length) return;
   const anyFlash = flashShadeIdx >= 0;
   if (!showHeat && !anyFlash) return;            // flashed cover can show even with Heat off
+  // pink & more opaque while the shelter panel is open (actively picking shade),
+  // otherwise an unobtrusive gray
+  const panel = document.getElementById("shadePanel");
+  const expanded = showHeat && panel && panel.style.display !== "none" && !shadePanelCollapsed;
+  const fill = expanded ? SHADE_PINK : SHADE_GRAY, alpha = expanded ? 0.65 : 0.5;
   ctx.save();
   state.shelters.forEach((s, idx) => {
     const pts = s.points, isFlash = idx === flashShadeIdx;
@@ -1488,7 +1494,7 @@ function drawShelters() {
     ctx.beginPath();
     pts.forEach((p, i) => { i ? ctx.lineTo(tx(p.x), ty(p.y)) : ctx.moveTo(tx(p.x), ty(p.y)); });
     ctx.closePath();
-    if (drawFill) { ctx.globalAlpha = 0.5; ctx.fillStyle = SHADE_COLOR; ctx.fill(); }
+    if (drawFill) { ctx.globalAlpha = alpha; ctx.fillStyle = fill; ctx.fill(); }
     if (isFlash) {                               // a tapped shelter row: bright outline
       ctx.globalAlpha = 1; ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
     }
@@ -1934,6 +1940,7 @@ function renderShadePanel() {
     shadePanelCollapsed = !shadePanelCollapsed;
     try { localStorage.setItem("ridesim.shadeCollapsed", shadePanelCollapsed ? "1" : "0"); } catch (e) {}
     el.classList.toggle("collapsed", shadePanelCollapsed);
+    draw();   // shade fill switches gray <-> pink with the panel state
   });
   el.querySelectorAll(".shade-row").forEach(row => { row.onclick = () => flashShade(+row.dataset.idx); });
 }
