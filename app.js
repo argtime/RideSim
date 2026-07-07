@@ -1782,38 +1782,51 @@ function drawLLBadge(X, Y, r) {
   ctx.fillText("⚡", bx, by);
 }
 // Make a floating map panel draggable by its .ll-head. A small move counts as a
-// drag (repositions + remembers where); a plain click still runs onTap (collapse).
-// Re-callable each render (the header is rebuilt with innerHTML).
+// drag (repositions + remembers where); a plain tap still runs onTap (collapse).
+// Bound once to the panel element (which persists across re-renders); mouse uses
+// pointer events, touch uses touch events with preventDefault so it doesn't
+// scroll the page or the panel (touch-action alone is unreliable inside an
+// overflow:auto scroll container on iOS).
 function bindPanelDrag(el, key, onTap) {
-  // restore a saved position (once dragged, it stays put across reloads)
-  try {
+  el._panTap = onTap;                        // refresh the collapse callback each render
+  if (el._dragBound) return;
+  el._dragBound = true;
+  try {                                      // restore a saved position (once)
     const s = JSON.parse(localStorage.getItem(key) || "null");
     if (s && isFinite(s.left) && isFinite(s.top)) { el.style.right = "auto"; el.style.left = s.left + "px"; el.style.top = s.top + "px"; }
   } catch (e) {}
-  const head = el.querySelector(".ll-head"); if (!head) return;
-  head.style.touchAction = "none";
-  head.onpointerdown = (e) => {
-    if (e.button != null && e.button !== 0) return;
+  let sx, sy, sl, st, moved = false, dragging = false;
+  const inHead = t => { const h = el.querySelector(".ll-head"); return !!(h && (t === h || h.contains(t))); };
+  const start = (cx, cy, t) => {
+    if (!inHead(t)) return false;            // only drag from the header
     const par = el.offsetParent || el.parentElement;
     const r = el.getBoundingClientRect(), pr = par.getBoundingClientRect();
-    const sx = e.clientX, sy = e.clientY, sl = r.left - pr.left, st = r.top - pr.top;
-    let moved = false;
+    sx = cx; sy = cy; sl = r.left - pr.left; st = r.top - pr.top; moved = false; dragging = true;
     el.style.right = "auto"; el.style.left = sl + "px"; el.style.top = st + "px";
-    try { head.setPointerCapture(e.pointerId); } catch (_) {}
-    head.onpointermove = (ev) => {
-      const dx = ev.clientX - sx, dy = ev.clientY - sy;
-      if (!moved && Math.abs(dx) + Math.abs(dy) > 4) moved = true;
-      if (!moved) return;
-      const nl = Math.max(0, Math.min(sl + dx, par.clientWidth - el.offsetWidth));
-      const nt = Math.max(0, Math.min(st + dy, par.clientHeight - el.offsetHeight));
-      el.style.left = nl + "px"; el.style.top = nt + "px";
-    };
-    head.onpointerup = () => {
-      head.onpointermove = null; head.onpointerup = null;
-      if (moved) { try { localStorage.setItem(key, JSON.stringify({ left: parseFloat(el.style.left), top: parseFloat(el.style.top) })); } catch (_) {} }
-      else if (onTap) onTap();   // no drag -> treat as a click (collapse)
-    };
+    return true;
   };
+  const move = (cx, cy) => {
+    if (!dragging) return;
+    const dx = cx - sx, dy = cy - sy;
+    if (!moved && Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+    if (!moved) return;
+    const par = el.offsetParent || el.parentElement;
+    el.style.left = Math.max(0, Math.min(sl + dx, par.clientWidth - el.offsetWidth)) + "px";
+    el.style.top = Math.max(0, Math.min(st + dy, par.clientHeight - el.offsetHeight)) + "px";
+  };
+  const end = () => {
+    if (!dragging) return;
+    dragging = false;
+    if (moved) { try { localStorage.setItem(key, JSON.stringify({ left: parseFloat(el.style.left), top: parseFloat(el.style.top) })); } catch (_) {} }
+    else if (el._panTap) el._panTap();       // no drag -> treat as a tap (collapse)
+  };
+  el.addEventListener("pointerdown", e => { if (e.pointerType === "touch") return; if (e.button === 0 && start(e.clientX, e.clientY, e.target)) { try { el.setPointerCapture(e.pointerId); } catch (_) {} } });
+  el.addEventListener("pointermove", e => { if (e.pointerType !== "touch") move(e.clientX, e.clientY); });
+  el.addEventListener("pointerup", e => { if (e.pointerType !== "touch") end(); });
+  el.addEventListener("touchstart", e => { const t = e.touches[0]; start(t.clientX, t.clientY, e.target); }, { passive: true });
+  el.addEventListener("touchmove", e => { if (dragging) { e.preventDefault(); const t = e.touches[0]; move(t.clientX, t.clientY); } }, { passive: false });
+  el.addEventListener("touchend", () => end(), { passive: true });
+  el.addEventListener("touchcancel", () => { dragging = false; }, { passive: true });
 }
 // proximity-sorted panel of rides with an LL available now
 function renderLLPanel() {
