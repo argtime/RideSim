@@ -2348,6 +2348,8 @@ function syncPlanUrl() {
     const cat = CAT_ORDER.map(c => catFilter[c] ? "1" : "0").join("");
     if (cat === "111111") u.searchParams.delete("cat");   // all shown = default, keep the URL clean
     else u.searchParams.set("cat", cat);
+    // panels/overlays: only once the user has touched one (else defaults stand)
+    if (panTouched) u.searchParams.set("pan", panParam());
     history.replaceState(null, "", u.toString());
   } catch (e) {}
 }
@@ -2359,6 +2361,35 @@ function loadCatParam() {
   document.querySelectorAll("#attrFilter .chip").forEach(chip => {
     if (chip.dataset.cat in catFilter) chip.classList.toggle("active", catFilter[chip.dataset.cat]);
   });
+  return true;
+}
+// Panels/overlays in the URL: "pan=LRPWGH" — L/R = left/right panels, P = plan,
+// W = waits, G = Lightning Lane, H = heat. Uppercase = on, lowercase = off. Only
+// written once the user changes one (so a fresh load keeps the normal defaults).
+let panTouched = false;
+const PAN_ORDER = ["L", "R", "P", "W", "G", "H"];
+function panStates() {
+  return {
+    L: !document.body.classList.contains("hide-left"),
+    R: !document.body.classList.contains("hide-right"),
+    P: showPlan, W: showLiveWaits, G: showLL, H: showHeat
+  };
+}
+function panParam() {
+  const s = panStates();
+  return PAN_ORDER.map(k => s[k] ? k : k.toLowerCase()).join("");
+}
+function loadPanParam() {
+  const v = new URLSearchParams(location.search).get("pan");
+  if (!v || !/^[lL][rR][pP][wW][gG][hH]$/.test(v)) return false;
+  const on = i => v[i] === v[i].toUpperCase();   // uppercase letter = shown/on
+  setPanelHidden("left", !on(0), false);
+  setPanelHidden("right", !on(1), false);
+  showPlan = on(2); setPlanToggleUI();
+  showLiveWaits = on(3); setLiveToggleUI();
+  showLL = on(4); setLLToggleUI();
+  showHeat = on(5); setHeatToggleUI();
+  panTouched = true;   // keep it maintained from here on
   return true;
 }
 /* ---------- Master refresh ---------------------------------------------- */
@@ -3121,7 +3152,7 @@ function setPanelHidden(side, hidden, resize) {
   const cap = side === "left" ? "Left" : "Right";
   setPanelHidden(side, false, false);   // both panels shown by default each load (hiding is per-session)
   const btn = document.getElementById("toggle" + cap);
-  if (btn) btn.onclick = () => setPanelHidden(side, !document.body.classList.contains("hide-" + side), true);
+  if (btn) btn.onclick = () => { panTouched = true; setPanelHidden(side, !document.body.classList.contains("hide-" + side), true); syncPlanUrl(); };
 });
 document.getElementById("clearSeq").onclick = () => { state.sequence = []; stop(); refresh(); };
 // "Paste" opens the data modal focused on the Plan tab (a copy/paste surface).
@@ -3189,7 +3220,7 @@ function setPlanToggleUI() { document.getElementById("planToggle").classList.tog
 document.getElementById("planToggle").onclick = () => {
   showPlan = !showPlan;
   localStorage.setItem("ridesim.showPlan", showPlan ? "1" : "0");
-  setPlanToggleUI(); draw();
+  setPlanToggleUI(); draw(); panTouched = true; syncPlanUrl();
 };
 setPlanToggleUI();
 
@@ -3205,6 +3236,7 @@ function setLiveToggleUI() { document.getElementById("liveToggle").classList.tog
 document.getElementById("liveToggle").onclick = () => {
   showLiveWaits = !showLiveWaits;
   localStorage.setItem("ridesim.liveWaits", showLiveWaits ? "1" : "0");
+  panTouched = true;   // liveToggled() -> refresh() -> syncPlanUrl() writes pan
   setLiveToggleUI(); liveToggled();
 };
 setLiveToggleUI();
@@ -3212,6 +3244,7 @@ function setLLToggleUI() { document.getElementById("llToggle").classList.toggle(
 document.getElementById("llToggle").onclick = () => {
   showLL = !showLL;
   localStorage.setItem("ridesim.ll", showLL ? "1" : "0");
+  panTouched = true;   // liveToggled() -> refresh() -> syncPlanUrl() writes pan
   setLLToggleUI(); liveToggled();
 };
 setLLToggleUI();
@@ -3219,7 +3252,7 @@ function setHeatToggleUI() { const b = document.getElementById("heatToggle"); if
 { const hb = document.getElementById("heatToggle"); if (hb) hb.onclick = () => {
   showHeat = !showHeat;
   localStorage.setItem("ridesim.heat", showHeat ? "1" : "0");
-  setHeatToggleUI(); renderUvBadge(); renderShadePanel(); draw();
+  setHeatToggleUI(); renderUvBadge(); renderShadePanel(); draw(); panTouched = true; syncPlanUrl();
 }; }
 setHeatToggleUI();
 function setAudioToggleUI() { document.getElementById("audioToggle").classList.toggle("active", audioOn); }
@@ -3418,6 +3451,7 @@ function init() {
   setStartNow();          // default the day to the current time
   loadPlanParam();        // a shared "?plan=" link overrides start + sequence
   loadCatParam();         // "?cat=010101" overrides which categories are shown
+  loadPanParam();         // "?pan=LRPWGH" overrides panels + overlays
   resizeCanvas();
   refresh();
   // one live feed (ThemeParks.wiki) powers waits + LL; fetch once attractions exist
