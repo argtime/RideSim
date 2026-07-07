@@ -599,12 +599,15 @@ function fetchWeather() {
   const ll = parkCentroidLatLon();
   if (!ll) { el.style.display = "none"; return; }   // uncalibrated park: no location, no temp
   const url = "https://api.open-meteo.com/v1/forecast?latitude=" + ll.lat.toFixed(4) +
-    "&longitude=" + ll.lon.toFixed(4) +
-    "&current=apparent_temperature,temperature_2m,relative_humidity_2m,wet_bulb_temperature_2m,uv_index&temperature_unit=fahrenheit";
+    "&longitude=" + ll.lon.toFixed(4) + "&timezone=auto&temperature_unit=fahrenheit" +
+    "&current=apparent_temperature,temperature_2m,relative_humidity_2m,wet_bulb_temperature_2m,uv_index,weather_code" +
+    "&minutely_15=precipitation,precipitation_probability&forecast_minutely_15=12" +
+    "&hourly=weather_code,precipitation_probability&forecast_hours=6";
   fetch(url, { cache: "no-store" }).then(r => r.json()).then(d => {
     const c = (d && d.current) || {};
     lastUv = (typeof c.uv_index === "number" && isFinite(c.uv_index)) ? c.uv_index : null;
     renderUvBadge();
+    renderWeatherAlert(scanRain(d.minutely_15), scanStorm(d.hourly, c.weather_code));
     const feels = c.apparent_temperature;
     if (typeof feels === "number" && isFinite(feels)) {
       const air = c.temperature_2m;
@@ -618,6 +621,66 @@ function fetchWeather() {
         '<div class="ft-text"><span class="lbl">feels like</span><span class="tm">' + Math.round(feels) + '°</span></div>';
     } else el.style.display = "none";
   }).catch(() => { el.style.display = "none"; });
+}
+// WMO thunderstorm codes.
+function isStormCode(wc) { return wc === 95 || wc === 96 || wc === 99; }
+// First 15-min slot in the next ~3h where measurable rain is forecast (or a high
+// chance). Returns { iso, mins, prob } or null.
+function scanRain(mn) {
+  if (!mn || !mn.time) return null;
+  const now = Date.now(), precip = mn.precipitation || [], prob = mn.precipitation_probability || [];
+  for (let i = 0; i < mn.time.length; i++) {
+    const t = new Date(mn.time[i]).getTime();
+    if (t < now - 8 * 60000) continue;          // ignore slots already past
+    if (t > now + 180 * 60000) break;           // look ~3h ahead
+    const wet = (precip[i] >= 0.1) || (prob[i] >= 60);
+    if (wet) return { iso: mn.time[i], mins: Math.max(0, Math.round((t - now) / 60000)), prob: prob[i] };
+  }
+  return null;
+}
+// Thunderstorm in the current conditions or the next few hours. { iso, mins, now }.
+function scanStorm(hr, currentCode) {
+  if (isStormCode(currentCode)) return { iso: null, mins: 0, now: true };
+  if (!hr || !hr.time || !hr.weather_code) return null;
+  const now = Date.now();
+  for (let i = 0; i < hr.time.length; i++) {
+    const t = new Date(hr.time[i]).getTime();
+    if (t < now - 60 * 60000) continue;
+    if (t > now + 5 * 3600000) break;           // next ~5h
+    if (isStormCode(hr.weather_code[i])) return { iso: hr.time[i], mins: Math.max(0, Math.round((t - now) / 60000)), now: false };
+  }
+  return null;
+}
+// "now" / "~3.40p (25m)" for an alert time.
+function alertWhen(x) {
+  if (!x || x.now || x.mins <= 5) return "now";
+  return "~" + tCompactFromISO(x.iso) + " (" + x.mins + "m)";
+}
+function renderWeatherAlert(rain, storm) {
+  const el = document.getElementById("weatherAlert"); if (!el) return;
+  let cls = "", txt = "";
+  if (storm) { cls = "storm"; txt = "⛈ Thunderstorm " + alertWhen(storm) + " — take cover"; }
+  else if (rain) { cls = "rain"; txt = "🌧 Rain " + alertWhen(rain) + (rain.prob >= 0 ? " · " + Math.round(rain.prob) + "%" : ""); }
+  if (!txt) { el.style.display = "none"; return; }
+  el.className = "weather-alert " + cls;
+  el.style.display = "flex";
+  el.textContent = txt;
+  el.title = "Tap to flash the nearest cover";
+  el.onclick = flashNearestCover;
+}
+// Flash the closest rain-cover polygon on the map (turns Heat on if it's off so
+// the flash is visible), from where you are.
+function flashNearestCover() {
+  const ref = currentRefPoint(); if (!ref) return;
+  const refNode = myLocation ? geoStartNode : startNode();
+  const distMap = (refNode && state.nodes.has(refNode)) ? dijkstraAll(refNode) : null;
+  let best = -1, bd = Infinity;
+  (state.shelters || []).forEach((s, i) => {
+    if (!(s.cover || s.indoor) || !s.points || s.points.length < 3) return;
+    const d = pointInPoly(ref, s.points) ? 0 : (distMap && isFinite(distMap.get(nearestNodeTo(polyCentroid(s.points)))) ? distMap.get(nearestNodeTo(polyCentroid(s.points))) : polyDistPx(ref, s.points));
+    if (d < bd) { bd = d; best = i; }
+  });
+  if (best >= 0) flashShade(best);
 }
 
 // Closest node of any kind to a map-pixel point.
@@ -1253,16 +1316,19 @@ function drawSadFace(cx, cy, r, color) {
 // Rain-cover and indoor polygons come later, with the rain features.
 const SHADE_COLOR = "#ff1a8c";   // hot pink — stands out against the map
 function drawShelters() {
-  if (!showHeat || !state.shelters || !state.shelters.length) return;
+  if (!state.shelters || !state.shelters.length) return;
+  const anyFlash = flashShadeIdx >= 0;
+  if (!showHeat && !anyFlash) return;            // flashed cover can show even with Heat off
   ctx.save();
   state.shelters.forEach((s, idx) => {
     const pts = s.points, isFlash = idx === flashShadeIdx;
     if (!pts || pts.length < 3) return;
-    if (!s.shade && !isFlash) return;            // shade gets a fill; other types only drawn to flash
+    const drawFill = showHeat && s.shade;        // shade gets a fill; other types only drawn to flash
+    if (!drawFill && !isFlash) return;
     ctx.beginPath();
     pts.forEach((p, i) => { i ? ctx.lineTo(tx(p.x), ty(p.y)) : ctx.moveTo(tx(p.x), ty(p.y)); });
     ctx.closePath();
-    if (s.shade) { ctx.globalAlpha = 0.5; ctx.fillStyle = SHADE_COLOR; ctx.fill(); }
+    if (drawFill) { ctx.globalAlpha = 0.5; ctx.fillStyle = SHADE_COLOR; ctx.fill(); }
     if (isFlash) {                               // a tapped shelter row: bright outline
       ctx.globalAlpha = 1; ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
     }
