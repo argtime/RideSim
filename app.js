@@ -1221,7 +1221,7 @@ function drawSadFace(cx, cy, r, color) {
 // Shelter overlay, drawn as part of the Heat layer: shaded areas as a light fill
 // plus a defined outline so the region reads even over the (already green) map.
 // Rain-cover and indoor polygons come later, with the rain features.
-const SHADE_COLOR = "#ff8c1a";   // orange — stands out against the map
+const SHADE_COLOR = "#ff1a8c";   // hot pink — stands out against the map
 function drawShelters() {
   if (!showHeat || !state.shelters || !state.shelters.length) return;
   ctx.save();
