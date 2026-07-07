@@ -179,6 +179,13 @@
   .ll-panel .ll-empty { color: var(--muted); font-style: italic; }
   .ll-panel .ll-credit { margin-top: 6px; font-size: 10px; color: var(--muted); }
   .ll-panel .ll-credit a { color: var(--muted); }
+  /* nearest-shade panel: left side (LL panel is on the right), green heading */
+  .shade-panel { left: 12px; right: auto; top: 120px; }
+  .shade-panel .ll-head { color: #2ecc71; }
+  .shade-panel .ll-sub { font-size: 10px; color: var(--muted); margin-bottom: 2px; }
+  .shade-panel.collapsed .ll-sub { display: none; }
+  .shade-panel .ll-row { cursor: pointer; }
+  .shade-panel .ll-dist { color: #2ecc71; }
   .nowplaying {
     position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
     background: rgba(16,22,36,.9); border: 1px solid var(--border); border-radius: 20px;

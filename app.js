@@ -616,6 +616,7 @@ function onGeoFix(pos) {
   myLocation = { x: p.x, y: p.y, accM: c.accuracy };
   const nn = nearestNodeTo(p);
   if (nn !== geoStartNode) { geoStartNode = nn; if (!playing) refresh(); }   // re-route only when the snapped node changes
+  renderShadePanel();   // shade distances update as you move
   draw();
 }
 // ?pretend=lat,lon — fake a standing position for testing away from the park.
@@ -640,7 +641,13 @@ function toggleGeo() {
   if (!navigator.geolocation) { alert("Geolocation isn't available in this browser."); return; }
   geoActive = true; refreshGeoBtn();
   geoWatchId = navigator.geolocation.watchPosition(onGeoFix,
-    e => { stopGeo(); alert("Couldn't get your location: " + e.message); },
+    e => {
+      stopGeo();
+      const denied = e && e.code === 1;   // PERMISSION_DENIED — iOS often blocks silently
+      alert(denied
+        ? "Location is blocked for this page. On iPhone: tap the “aA” (or ⋯) in Safari's address bar → Website Settings → Location → Allow, and check Settings → Privacy & Security → Location Services → Safari Websites is On (Ask/While Using). Then tap 📍 Me again."
+        : "Couldn't get your location: " + (e && e.message ? e.message : "unknown error"));
+    },
     { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
 }
 function stopGeo() {
@@ -1226,15 +1233,16 @@ const SHADE_COLOR = "#ff1a8c";   // hot pink — stands out against the map
 function drawShelters() {
   if (!showHeat || !state.shelters || !state.shelters.length) return;
   ctx.save();
-  ctx.globalAlpha = 0.5;
-  ctx.fillStyle = SHADE_COLOR;
-  state.shelters.forEach(s => {
+  state.shelters.forEach((s, idx) => {
     const pts = s.points;
     if (!s.shade || !pts || pts.length < 3) return;
     ctx.beginPath();
     pts.forEach((p, i) => { i ? ctx.lineTo(tx(p.x), ty(p.y)) : ctx.moveTo(tx(p.x), ty(p.y)); });
     ctx.closePath();
-    ctx.fill();
+    ctx.globalAlpha = 0.5; ctx.fillStyle = SHADE_COLOR; ctx.fill();
+    if (idx === flashShadeIdx) {                 // a tapped shade row: bright outline
+      ctx.globalAlpha = 1; ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.stroke();
+    }
   });
   ctx.restore();
 }
@@ -1550,6 +1558,88 @@ function renderLLPanel() {
     try { localStorage.setItem("ridesim.llCollapsed", llPanelCollapsed ? "1" : "0"); } catch (e) {}
     el.classList.toggle("collapsed", llPanelCollapsed);
   };
+}
+
+/* ---------- Nearest shade panel (part of the Heat layer) ---------------- */
+// Where "you" are: the live GPS dot if active, else the plan's start node.
+function currentRefPoint() {
+  if (myLocation) return { x: myLocation.x, y: myLocation.y };
+  const n = state.nodes.get(startNode());
+  return n ? { x: n.x, y: n.y } : null;
+}
+function polyCentroid(pts) {
+  let x = 0, y = 0; pts.forEach(p => { x += p.x; y += p.y; });
+  return { x: x / pts.length, y: y / pts.length };
+}
+function pointInPoly(p, pts) {
+  let c = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+    if (((yi > p.y) !== (yj > p.y)) && (p.x < (xj - xi) * (p.y - yi) / (yj - yi) + xi)) c = !c;
+  }
+  return c;
+}
+function distPtSeg(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+  let t = L2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+// Straight-line pixel distance from a point to a polygon (0 if inside).
+function polyDistPx(pt, pts) {
+  if (pointInPoly(pt, pts)) return 0;
+  let m = Infinity;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) m = Math.min(m, distPtSeg(pt, pts[j], pts[i]));
+  return m;
+}
+function nearestAttrName(pt) {
+  let best = null, bd = Infinity;
+  state.attractions.forEach(a => {
+    const loc = a.displayLocation || state.nodes.get(a.entranceNodeId); if (!loc) return;
+    const d = (loc.x - pt.x) * (loc.x - pt.x) + (loc.y - pt.y) * (loc.y - pt.y);
+    if (d < bd) { bd = d; best = a.name; }
+  });
+  return best;
+}
+let flashShadeIdx = -1, flashShadeTimer = null;
+function flashShade(idx) {
+  flashShadeIdx = idx;
+  if (flashShadeTimer) clearTimeout(flashShadeTimer);
+  flashShadeTimer = setTimeout(() => { flashShadeIdx = -1; draw(); }, 2600);
+  draw();
+}
+let shadePanelCollapsed = localStorage.getItem("ridesim.shadeCollapsed") === "1";
+function renderShadePanel() {
+  const el = document.getElementById("shadePanel"); if (!el) return;
+  const shades = (state.shelters || [])
+    .map((s, i) => ({ s: s, i: i }))
+    .filter(o => o.s.shade && o.s.points && o.s.points.length >= 3);
+  const ref = currentRefPoint();
+  if (!showHeat || !shades.length || !ref) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  const rows = shades.map(o => ({
+    idx: o.i,
+    dist: polyDistPx(ref, o.s.points),
+    near: nearestAttrName(polyCentroid(o.s.points))
+  })).sort((a, b) => a.dist - b.dist);
+  const src = myLocation ? "your location" : "the start";
+  let html = '<div class="ll-head">🌳 Nearest shade<span class="ll-caret">▾</span></div>';
+  html += '<div class="ll-sub">from ' + src + '</div>';
+  rows.slice(0, 6).forEach(r => {
+    const label = r.dist === 0 ? "you're in shade here" : "near " + esc(r.near || "?");
+    const dist = r.dist === 0 ? "◆" : fmtFeet(r.dist * ftPerPx());
+    html += '<div class="ll-row shade-row" data-idx="' + r.idx + '"><span class="ll-nm">' + label + '</span>' +
+      '<span class="ll-dist">' + dist + '</span></div>';
+  });
+  el.innerHTML = html;
+  el.classList.toggle("collapsed", shadePanelCollapsed);
+  const head = el.querySelector(".ll-head");
+  if (head) head.onclick = () => {
+    shadePanelCollapsed = !shadePanelCollapsed;
+    try { localStorage.setItem("ridesim.shadeCollapsed", shadePanelCollapsed ? "1" : "0"); } catch (e) {}
+    el.classList.toggle("collapsed", shadePanelCollapsed);
+  };
+  el.querySelectorAll(".shade-row").forEach(row => { row.onclick = () => flashShade(+row.dataset.idx); });
 }
 // Attribution for ThemeParks.wiki; shown whenever an overlay is on.
 function updateLiveCredit() {
@@ -1960,6 +2050,7 @@ function refresh() {
   updateEndClock();
   renderSunFooter();
   renderLLPanel();
+  renderShadePanel();
   syncPlanUrl();
   draw();
 }
@@ -2806,7 +2897,7 @@ function setHeatToggleUI() { const b = document.getElementById("heatToggle"); if
 { const hb = document.getElementById("heatToggle"); if (hb) hb.onclick = () => {
   showHeat = !showHeat;
   localStorage.setItem("ridesim.heat", showHeat ? "1" : "0");
-  setHeatToggleUI(); renderUvBadge(); draw();
+  setHeatToggleUI(); renderUvBadge(); renderShadePanel(); draw();
 }; }
 setHeatToggleUI();
 function setAudioToggleUI() { document.getElementById("audioToggle").classList.toggle("active", audioOn); }
