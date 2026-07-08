@@ -1811,8 +1811,11 @@ function bindPanelDrag(el, key, onTap) {
     if (!moved && Math.abs(dx) + Math.abs(dy) > 4) moved = true;
     if (!moved) return;
     const par = el.offsetParent || el.parentElement;
+    const head = el.querySelector(".ll-head"), headH = head ? head.offsetHeight : 24;
+    // horizontally keep the whole panel on the map; vertically let it slide off the
+    // bottom but stop before the header would disappear (so it stays grabbable)
     el.style.left = Math.max(0, Math.min(sl + dx, par.clientWidth - el.offsetWidth)) + "px";
-    el.style.top = Math.max(0, Math.min(st + dy, par.clientHeight - el.offsetHeight)) + "px";
+    el.style.top = Math.max(0, Math.min(st + dy, par.clientHeight - headH)) + "px";
   };
   const end = () => {
     if (!dragging) return;
