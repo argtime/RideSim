@@ -154,13 +154,6 @@
   body.uv-shown .end-clock { top: 66px; }
   .end-clock .lbl { font-size: 9px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); }
   .end-clock .tm { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text); }
-  .map-legend {
-    position: absolute; left: 12px; bottom: 12px; background: rgba(16,22,36,.82);
-    border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 11px;
-    display: flex; flex-direction: column; gap: 4px;
-  }
-  .map-legend .row { display: flex; align-items: center; gap: 7px; }
-  .swatch { width: 14px; height: 4px; border-radius: 2px; }
   .qt-credit {
     position: absolute; right: 12px; bottom: 12px; display: none;
     background: rgba(16,22,36,.88); border: 1px solid var(--border); border-radius: 8px;
