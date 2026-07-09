@@ -158,6 +158,7 @@
     position: absolute; left: 12px; bottom: 12px; background: rgba(16,22,36,.82);
     border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 11px;
     display: flex; flex-direction: column; gap: 4px;
+    transform: scale(0.75); transform-origin: bottom left;
   }
   .map-legend .row { display: flex; align-items: center; gap: 7px; }
   .swatch { width: 14px; height: 4px; border-radius: 2px; }
