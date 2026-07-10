@@ -1125,17 +1125,17 @@ End Function
 Private Function TrackPointsJson(shp As Visio.Shape) As String
     Dim pts As Collection: Set pts = New Collection
     On Error Resume Next
-    Dim i As Long, r As Long, xl As Double, yl As Double
-    For i = 1 To shp.GeometryCount
-        r = 1
-        Do While shp.CellExistsU("Geometry" & i & ".X" & r, 0)
-            xl = shp.CellsU("Geometry" & i & ".X" & r).ResultIU
-            yl = shp.CellsU("Geometry" & i & ".Y" & r).ResultIU
-            pts.Add LocalToPagePx(shp, xl, yl)
-            r = r + 1
-        Loop
-    Next i
-    If pts.Count < 2 Then
+    ' Shape.Paths returns the flattened outline in page coordinates, so curves
+    ' (arcs, splines) come through as points automatically — no need to hand-add
+    ' vertices in the drawing to make a curve export smoothly.
+    Dim pth As Visio.Path, arr As Variant, k As Long
+    For Each pth In shp.Paths
+        arr = pth.Points(0.05)                 ' flatness (inches); smaller = smoother curves
+        For k = LBound(arr) To UBound(arr) - 1 Step 2
+            pts.Add Array(Round(arr(k) * PPI), Round((mPageH - arr(k + 1)) * PPI))
+        Next k
+    Next pth
+    If pts.Count < 2 Then                       ' straight connector with no path: its two endpoints
         Set pts = New Collection
         pts.Add Array(Round(CN(shp, "BeginX") * PPI), Round((mPageH - CN(shp, "BeginY")) * PPI))
         pts.Add Array(Round(CN(shp, "EndX") * PPI), Round((mPageH - CN(shp, "EndY")) * PPI))
