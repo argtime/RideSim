@@ -2341,9 +2341,34 @@ function renderSunFooter() {
     const d = sunSegments();
     legend = '<span style="color:#ffcc4d">☀️ ' + fmtDur(d.sun) + '</span><span style="color:var(--accent)">❄️ ' + fmtDur(d.ac) + '</span>';
   }
-  el.innerHTML = '<div class="sf-track">' + ticks + segHtml + '</div>' +
-    '<div class="sf-axis">' + labels + (legend ? '<div class="sf-legend">' + legend + '</div>' : "") + '</div>';
+  el.innerHTML = '<div class="sf-track">' + ticks + segHtml + '<div class="sf-now" id="sfNow"></div></div>' +
+    '<div class="sf-axis">' + labels + (legend ? '<div class="sf-legend">' + legend + '</div>' : "") +
+    '<div class="sf-now-lbl" id="sfNowLbl"></div></div>';
   el.querySelectorAll(".sf-seg").forEach(seg => { seg.onclick = () => selectStep(+seg.dataset.step); });
+  // a rebuild mid-animation (e.g. a plan edit while paused) would drop the cursor
+  if (state.steps.length && (playing || animClock > 0)) updateSunNow(state.steps[0].walkStart + animClock);
+}
+// Moving "now" cursor on the sun bar: a line sweeping the track plus a clock
+// label riding the axis underneath, both driven by the animation clock.
+function sunNowLabel(min) {
+  min = Math.round(((min % 1440) + 1440) % 1440);
+  const h = Math.floor(min / 60), m = min % 60, ap = h < 12 ? "a" : "p";
+  let hh = h % 12; if (hh === 0) hh = 12;
+  return hh + ":" + String(m).padStart(2, "0") + ap;
+}
+function updateSunNow(absT) {
+  const line = document.getElementById("sfNow"), lbl = document.getElementById("sfNowLbl");
+  if (!line || !lbl) return;
+  const left = ((((absT % 1440) + 1440) % 1440) / 1440 * 100).toFixed(3) + "%";
+  line.style.left = left; line.style.display = "block";
+  lbl.style.left = left; lbl.style.display = "block";
+  const t = sunNowLabel(absT);
+  if (lbl.textContent !== t) lbl.textContent = t;
+}
+function hideSunNow() {
+  const line = document.getElementById("sfNow"), lbl = document.getElementById("sfNowLbl");
+  if (line) line.style.display = "";
+  if (lbl) lbl.style.display = "";
 }
 function renderSummary() {
   const el = document.getElementById("summary");
@@ -2503,6 +2528,7 @@ function stop() {
   stopAudio();
   document.getElementById("playBtn").textContent = "▶ Play";
   document.getElementById("nowPlaying").classList.remove("show");
+  hideSunNow();
   document.querySelectorAll(".tl-row").forEach(r => r.style.background = "");
   document.querySelectorAll(".seq-item.active").forEach(r => r.classList.remove("active"));
   seqHighlightIdx = -1;
@@ -2715,6 +2741,7 @@ function renderAnimAt(clock) {
   np.innerHTML = '<span class="badge" style="background:' + badgeColor + ';color:#0f1420">' +
     badgeLabel + '</span><span>' + esc(info) + '</span>' +
     '<span style="color:var(--muted)">🕐 ' + minToHM(absT) + '</span>';
+  updateSunNow(absT);
 
   // highlight active timeline row (match by phase — rows now vary with transit)
   document.querySelectorAll(".tl-row").forEach(r => r.style.background = "");
