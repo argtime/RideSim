@@ -1451,11 +1451,12 @@ function draw(marker) {
   // marker
   if (marker) {
     const ms = marker.scale || 1;                 // avatar scales on rides or at restaurants/restrooms
+    const vs = marker.stretch || 1;               // vertical only: coasters stretch, indoor rides squash
     const AVATAR_PURPLE = "#9d7bff";              // always use ride purple for fill
-    ctx.beginPath(); ctx.arc(tx(marker.x), ty(marker.y), 7 * ms, 0, 7);
+    ctx.beginPath(); ctx.ellipse(tx(marker.x), ty(marker.y), 7 * ms, 7 * ms * vs, 0, 0, 7);
     ctx.fillStyle = AVATAR_PURPLE; ctx.fill();
     ctx.lineWidth = 2; ctx.strokeStyle = marker.stroke || "#5cc8ff"; ctx.stroke();
-    ctx.beginPath(); ctx.arc(tx(marker.x), ty(marker.y), 11 * ms, 0, 7);
+    ctx.beginPath(); ctx.ellipse(tx(marker.x), ty(marker.y), 11 * ms, 11 * ms * vs, 0, 0, 7);
     ctx.strokeStyle = marker.stroke || "#5cc8ff"; ctx.globalAlpha = .4; ctx.stroke(); ctx.globalAlpha = 1;
   }
   drawMyLocation();   // "you are here" GPS dot, on top
@@ -2722,6 +2723,8 @@ function renderAnimAt(clock) {
       } else {
         marker = { x: disp.x, y: disp.y, stroke: strokeColor, scale: rideScale };
       }
+      // coasters stretch the avatar vertically; indoor (shaded) rides squash it
+      if (s.category === "ride") marker.stretch = (a && a.coaster) ? 1.2 : insideR(a) ? 0.8 : 1;
       info = meta.anim + s.name;
       break;
     }
