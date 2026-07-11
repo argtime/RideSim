@@ -2330,20 +2330,48 @@ function renderSunFooter() {
     });
     const KIND = { sun: { c: "#ffcc4d", tip: "Hot" }, shade: { c: "#a9def0", tip: "Shade" }, ac: { c: "var(--accent)", tip: "AC" } };
     segHtml = blocks.map((b, i) => {
-      const left = (((b.a % DAY) + DAY) % DAY) / DAY * 100, w = (b.b - b.a) / DAY * 100;
+      const startMin = ((b.a % DAY) + DAY) % DAY, dur = b.b - b.a;
       const k = KIND[b.kind];
       const tip = k.tip + " · " + b.label + " · " + minToHM(b.a) + "–" + minToHM(b.b);
       // 1px black divider between contiguous same-color blocks (none across a color change)
       const div = (i > 0 && blocks[i - 1].kind === b.kind) ? ";border-left:1px solid #000" : "";
-      return '<div class="sf-seg" data-step="' + b.step + '" style="left:' + left.toFixed(3) + '%;width:' + Math.max(w, 0.06).toFixed(3) +
-        '%;background:' + k.c + div + '" title="' + esc(tip) + '"></div>';
+      const seg = (leftMin, min, d) => '<div class="sf-seg" data-step="' + b.step + '" style="left:' + (leftMin / DAY * 100).toFixed(3) +
+        '%;width:' + Math.max(min / DAY * 100, 0.06).toFixed(3) + '%;background:' + k.c + d + '" title="' + esc(tip) + '"></div>';
+      // a block that crosses midnight wraps: tail at the right edge, rest from 12a
+      if (startMin + dur > DAY) return seg(startMin, DAY - startMin, div) + seg(0, startMin + dur - DAY, "");
+      return seg(startMin, dur, div);
     }).join("");
     const d = sunSegments();
     legend = '<span style="color:#ffcc4d">☀️ ' + fmtDur(d.sun) + '</span><span style="color:var(--accent)">❄️ ' + fmtDur(d.ac) + '</span>';
   }
-  el.innerHTML = '<div class="sf-track">' + ticks + segHtml + '</div>' +
-    '<div class="sf-axis">' + labels + (legend ? '<div class="sf-legend">' + legend + '</div>' : "") + '</div>';
+  el.innerHTML = '<div class="sf-track">' + ticks + segHtml + '<div class="sf-now" id="sfNow"></div></div>' +
+    '<div class="sf-axis">' + labels + (legend ? '<div class="sf-legend">' + legend + '</div>' : "") +
+    '<div class="sf-now-lbl" id="sfNowLbl"></div></div>';
   el.querySelectorAll(".sf-seg").forEach(seg => { seg.onclick = () => selectStep(+seg.dataset.step); });
+  // a rebuild mid-animation (e.g. a plan edit while paused) would drop the cursor
+  if (state.steps.length && (playing || animClock > 0)) updateSunNow(state.steps[0].walkStart + animClock);
+}
+// Moving "now" cursor on the sun bar: a line sweeping the track plus a clock
+// label riding the axis underneath, both driven by the animation clock.
+function sunNowLabel(min) {
+  min = Math.round(((min % 1440) + 1440) % 1440);
+  const h = Math.floor(min / 60), m = min % 60, ap = h < 12 ? "a" : "p";
+  let hh = h % 12; if (hh === 0) hh = 12;
+  return hh + ":" + String(m).padStart(2, "0") + ap;
+}
+function updateSunNow(absT) {
+  const line = document.getElementById("sfNow"), lbl = document.getElementById("sfNowLbl");
+  if (!line || !lbl) return;
+  const left = ((((absT % 1440) + 1440) % 1440) / 1440 * 100).toFixed(3) + "%";
+  line.style.left = left; line.style.display = "block";
+  lbl.style.left = left; lbl.style.display = "block";
+  const t = sunNowLabel(absT);
+  if (lbl.textContent !== t) lbl.textContent = t;
+}
+function hideSunNow() {
+  const line = document.getElementById("sfNow"), lbl = document.getElementById("sfNowLbl");
+  if (line) line.style.display = "";
+  if (lbl) lbl.style.display = "";
 }
 function renderSummary() {
   const el = document.getElementById("summary");
@@ -2389,6 +2417,9 @@ function syncPlanUrl() {
     const t = getPlanTitle();
     if (t) u.searchParams.set("title", t);
     else u.searchParams.delete("title");
+    // reflect the plan name in the tab / share-sheet title
+    const base = ((SAMPLE.meta && SAMPLE.meta.name) || "Ride") + " Ride Sequence Planner";
+    document.title = t ? t + " — " + base : base;
     const cat = CAT_ORDER.map((c, i) => catFilter[c] ? CAT_LETTERS[i] : CAT_LETTERS[i].toLowerCase()).join("");
     if (cat === "RDSPBO") u.searchParams.delete("cat");   // all shown = default, keep the URL clean
     else u.searchParams.set("cat", cat);
@@ -2503,6 +2534,7 @@ function stop() {
   stopAudio();
   document.getElementById("playBtn").textContent = "▶ Play";
   document.getElementById("nowPlaying").classList.remove("show");
+  hideSunNow();
   document.querySelectorAll(".tl-row").forEach(r => r.style.background = "");
   document.querySelectorAll(".seq-item.active").forEach(r => r.classList.remove("active"));
   seqHighlightIdx = -1;
@@ -2715,6 +2747,7 @@ function renderAnimAt(clock) {
   np.innerHTML = '<span class="badge" style="background:' + badgeColor + ';color:#0f1420">' +
     badgeLabel + '</span><span>' + esc(info) + '</span>' +
     '<span style="color:var(--muted)">🕐 ' + minToHM(absT) + '</span>';
+  updateSunNow(absT);
 
   // highlight active timeline row (match by phase — rows now vary with transit)
   document.querySelectorAll(".tl-row").forEach(r => r.style.background = "");
