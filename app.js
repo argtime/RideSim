@@ -2330,13 +2330,16 @@ function renderSunFooter() {
     });
     const KIND = { sun: { c: "#ffcc4d", tip: "Hot" }, shade: { c: "#a9def0", tip: "Shade" }, ac: { c: "var(--accent)", tip: "AC" } };
     segHtml = blocks.map((b, i) => {
-      const left = (((b.a % DAY) + DAY) % DAY) / DAY * 100, w = (b.b - b.a) / DAY * 100;
+      const startMin = ((b.a % DAY) + DAY) % DAY, dur = b.b - b.a;
       const k = KIND[b.kind];
       const tip = k.tip + " · " + b.label + " · " + minToHM(b.a) + "–" + minToHM(b.b);
       // 1px black divider between contiguous same-color blocks (none across a color change)
       const div = (i > 0 && blocks[i - 1].kind === b.kind) ? ";border-left:1px solid #000" : "";
-      return '<div class="sf-seg" data-step="' + b.step + '" style="left:' + left.toFixed(3) + '%;width:' + Math.max(w, 0.06).toFixed(3) +
-        '%;background:' + k.c + div + '" title="' + esc(tip) + '"></div>';
+      const seg = (leftMin, min, d) => '<div class="sf-seg" data-step="' + b.step + '" style="left:' + (leftMin / DAY * 100).toFixed(3) +
+        '%;width:' + Math.max(min / DAY * 100, 0.06).toFixed(3) + '%;background:' + k.c + d + '" title="' + esc(tip) + '"></div>';
+      // a block that crosses midnight wraps: tail at the right edge, rest from 12a
+      if (startMin + dur > DAY) return seg(startMin, DAY - startMin, div) + seg(0, startMin + dur - DAY, "");
+      return seg(startMin, dur, div);
     }).join("");
     const d = sunSegments();
     legend = '<span style="color:#ffcc4d">☀️ ' + fmtDur(d.sun) + '</span><span style="color:var(--accent)">❄️ ' + fmtDur(d.ac) + '</span>';
@@ -2414,6 +2417,9 @@ function syncPlanUrl() {
     const t = getPlanTitle();
     if (t) u.searchParams.set("title", t);
     else u.searchParams.delete("title");
+    // reflect the plan name in the tab / share-sheet title
+    const base = ((SAMPLE.meta && SAMPLE.meta.name) || "Ride") + " Ride Sequence Planner";
+    document.title = t ? t + " — " + base : base;
     const cat = CAT_ORDER.map((c, i) => catFilter[c] ? CAT_LETTERS[i] : CAT_LETTERS[i].toLowerCase()).join("");
     if (cat === "RDSPBO") u.searchParams.delete("cat");   // all shown = default, keep the URL clean
     else u.searchParams.set("cat", cat);
