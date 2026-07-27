@@ -1307,7 +1307,7 @@ function drawZoomedNames() {
   const fs = 10 * Math.sqrt(userZoom);
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   ctx.font = "600 " + fs.toFixed(1) + "px -apple-system,Segoe UI,Roboto,sans-serif";
-  ctx.lineWidth = Math.max(2, fs * 0.28); ctx.lineJoin = "round";
+  ctx.lineWidth = Math.max(1.5, fs * 0.14); ctx.lineJoin = "round";   // light halo, just enough for legibility
   state.attractions.forEach(a => {
     const inSeq = seqIndexOf(a.id), cat = attrCat(a);
     if (!catFilter[cat] && inSeq < 0) return;      // filtered out
