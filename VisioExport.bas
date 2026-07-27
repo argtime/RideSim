@@ -151,6 +151,9 @@ Private Const BG_LAYER As String = "Bck"
 ' Layer holding ride track shapes. A shape on this layer is a ride animation
 ' path; glue one end into the ride shape to bind it to that ride.
 Private Const TRACK_LAYER As String = "Track"
+' Layer holding queue-line shapes: a per-ride path the avatar follows while
+' waiting (entrance -> load). Glue one end into the ride, same as a Track.
+Private Const QUEUE_LAYER As String = "Queue"
 ' Transport lines live on layers named "transit_<LineName>" (e.g. transit_Railroad).
 Private Const TRANSIT_PREFIX As String = "transit_"
 
@@ -160,6 +163,7 @@ Private mAttrMap As Collection             ' "k"&Shape.ID -> attractionId
 Private mRole As Collection                ' "k"&Shape.ID -> role (node-like shapes)
 Private mScaleIds As Collection            ' "k"&Shape.ID of ScaleStart/ScaleEnd shapes
 Private mTrackIds As Collection            ' "k"&Shape.ID of Track-layer shapes
+Private mQueueIds As Collection            ' "k"&Shape.ID of Queue-layer shapes
 Private mWarnings As Collection
 
 '------------------------------------------------------------------------------
@@ -174,6 +178,7 @@ Public Sub ExportRideSim()
     Set mRole = New Collection
     Set mScaleIds = New Collection
     Set mTrackIds = New Collection
+    Set mQueueIds = New Collection
     Set mWarnings = New Collection
 
     Dim shp As Visio.Shape, v As Variant
@@ -189,6 +194,7 @@ Public Sub ExportRideSim()
     Set attractions = New Collection
     Dim usedAttr As Collection: Set usedAttr = New Collection
     Dim trackShapes As Collection: Set trackShapes = New Collection
+    Dim queueShapes As Collection: Set queueShapes = New Collection
     Dim stationShapes As Collection: Set stationShapes = New Collection   ' transit Stop nodes
     Dim transitSegs As Collection: Set transitSegs = New Collection       ' directed track lines on transit_* layers
 
@@ -197,6 +203,7 @@ Public Sub ExportRideSim()
         If role <> "" Then mRole.Add role, "k" & shp.id
         If ScaleRole(shp) <> "" Then mScaleIds.Add True, "k" & shp.id
         If OnLayer(shp, TRACK_LAYER) Then mTrackIds.Add True, "k" & shp.id: trackShapes.Add shp
+        If OnLayer(shp, QUEUE_LAYER) Then mQueueIds.Add True, "k" & shp.id: queueShapes.Add shp
         If IsTransitLayer(shp) And role = "" Then transitSegs.Add shp   ' a transit track segment (any dimensionality)
         Select Case role
             Case "Node":     nodeShapes.Add shp
@@ -218,7 +225,7 @@ Public Sub ExportRideSim()
     Set exitOf = New Collection  ' "k"&ExitShapeID     -> attrId
     Dim directOf As Collection: Set directOf = New Collection ' "k"&AttractionShapeID -> node ShapeID (non-ride single-node link)
     For Each shp In pg.Shapes
-        If MasterRole(shp) = "" And shp.OneD And Not KeyExists(mTrackIds, "k" & shp.id) Then
+        If MasterRole(shp) = "" And shp.OneD And Not KeyExists(mTrackIds, "k" & shp.id) And Not KeyExists(mQueueIds, "k" & shp.id) Then
           If IsTransitLayer(shp) Then
             ' a transit segment - collected in pass A; excluded from walkway edges here
           Else
@@ -375,6 +382,30 @@ Public Sub ExportRideSim()
         End If
     Next
 
+    ' --- queue pass: per-ride wait-line polylines (shapes on the "Queue" layer)
+    '   Glued into their ride like a Track. The avatar follows this from the
+    '   entrance to the load point during the wait. Same order convention as a
+    '   track: draw it begin (entrance side) -> end (load side).
+    Dim queueOf As Collection: Set queueOf = New Collection ' "k"&AttractionShapeID -> points JSON
+    For Each v In queueShapes
+        Set shp = v
+        Dim qAttr As Visio.Shape: Set qAttr = TrackRideShape(shp)
+        If qAttr Is Nothing Then
+            Warn "Queue '" & shp.NameU & "' isn't glued to a ride - glue one end into the ride shape. Skipped."
+        ElseIf CategoryOf(qAttr) <> "ride" Then
+            Warn "Queue '" & shp.NameU & "' is attached to a non-ride ('" & mAttrMap("k" & qAttr.id) & "'). Skipped."
+        ElseIf KeyExists(queueOf, "k" & qAttr.id) Then
+            Warn "Ride '" & mAttrMap("k" & qAttr.id) & "' already has a queue; ignoring extra " & shp.NameU & "."
+        Else
+            Dim qPts As String: qPts = TrackPointsJson(shp)
+            If qPts = "" Then
+                Warn "Queue '" & shp.NameU & "' has fewer than 2 points. Skipped."
+            Else
+                queueOf.Add qPts, "k" & qAttr.id
+            End If
+        End If
+    Next
+
     ' --- pass E: attractions (entrance/exit from association lines) --------
     For Each v In attractions
         Set shp = v
@@ -418,8 +449,10 @@ Public Sub ExportRideSim()
         End If
         Dim trkJson As String: trkJson = ""
         If KeyExists(trackOf, "k" & shp.id) Then trkJson = trackOf("k" & shp.id)
+        Dim queJson As String: queJson = ""
+        If KeyExists(queueOf, "k" & shp.id) Then queJson = queueOf("k" & shp.id)
         If attrCount > 0 Then attrJson = attrJson & "," & vbCrLf
-        attrJson = attrJson & AttractionJson(aId, ShapeName(shp), entId, exId, ac(0), ac(1), RideDur(shp), CategoryOf(shp), IsClosed(shp), WaitIdOf(shp), accJson, PropStr(shp, "Hovertext"), AvgWaitOf(shp), trkJson, ThpwIdOf(shp), PropStr(shp, "Audio"), PropIsTrue(shp, Array("QInside", "QueueInside")), PropTri(shp, Array("RInside", "RideInside", "Indoor")), PropSunFrac(shp, Array("QSun", "QueueSun")))
+        attrJson = attrJson & AttractionJson(aId, ShapeName(shp), entId, exId, ac(0), ac(1), RideDur(shp), CategoryOf(shp), IsClosed(shp), WaitIdOf(shp), accJson, PropStr(shp, "Hovertext"), AvgWaitOf(shp), trkJson, queJson, ThpwIdOf(shp), PropStr(shp, "Audio"), PropIsTrue(shp, Array("QInside", "QueueInside")), PropTri(shp, Array("RInside", "RideInside", "Indoor")), PropSunFrac(shp, Array("QSun", "QueueSun")))
         attrCount = attrCount + 1
     Next
 
@@ -1475,7 +1508,7 @@ End Function
 Private Function AttractionJson(id As String, nm As String, entId As String, exId As String, _
                           x As Variant, y As Variant, ride As Double, cat As String, _
                           closed As Boolean, waitId As String, accessIds As String, _
-                          hover As String, avgWait As Double, trackJson As String, _
+                          hover As String, avgWait As Double, trackJson As String, queueJson As String, _
                           thpw As String, audio As String, qInside As Boolean, rInsideTri As Long, _
                           qSun As Double) As String
     ' Emit each optional field only when set; otherwise lines match the original
@@ -1496,6 +1529,8 @@ Private Function AttractionJson(id As String, nm As String, entId As String, exI
     If avgWait >= 0 Then avgJson = ", ""avgWait"": " & CLng(Round(avgWait))
     Dim trkJson As String
     If trackJson <> "" Then trkJson = ", ""track"": " & trackJson
+    Dim queJson As String
+    If queueJson <> "" Then queJson = ", ""queue"": " & queueJson
     Dim audioJson As String
     If Trim$(audio) <> "" Then audioJson = ", ""audio"": """ & JStr(Trim$(audio)) & """"
     Dim insideJson As String       ' indoor flags for the sun/AC bar (only when set)
@@ -1509,7 +1544,7 @@ Private Function AttractionJson(id As String, nm As String, entId As String, exI
     AttractionJson = "  { ""id"": """ & id & """, ""name"": """ & JStr(nm) & _
         """, ""entranceNodeId"": """ & entId & """, ""exitNodeId"": """ & exId & _
         """, ""displayLocation"": { ""x"": " & CLng(x) & ", ""y"": " & CLng(y) & _
-        " }, ""rideDuration"": " & CLng(Round(ride)) & catJson & closedJson & waitJson & thpwJson & accJson & hoverJson & avgJson & trkJson & audioJson & insideJson & " }"
+        " }, ""rideDuration"": " & CLng(Round(ride)) & catJson & closedJson & waitJson & thpwJson & accJson & hoverJson & avgJson & trkJson & queJson & audioJson & insideJson & " }"
 End Function
 
 ' ThemeParks.wiki entity GUID from Shape Data (Prop.ThPWID and aliases), used

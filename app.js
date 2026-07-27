@@ -1402,6 +1402,15 @@ function draw(marker) {
     drawPath(a.track, bright ? "rgba(157,123,255,0.9)" : "rgba(157,123,255,0.25)", bright ? 2.1 : 1.4, false);
   });
 
+  // queue paths (faint orange, distinct from the purple ride track). Brightens
+  // for the active ride during play, like its track.
+  state.attractions.forEach(a => {
+    if (!Array.isArray(a.queue) || a.queue.length < 2) return;
+    if (playing && seqIndexOf(a.id) < 0) return;   // focus on the plan while animating
+    const bright = a.id === activeTrackId && playing;
+    drawPath(a.queue, bright ? "rgba(255,138,92,0.9)" : "rgba(255,138,92,0.28)", bright ? 2.1 : 1.4, false);
+  });
+
   // sequence routes: prominent + direction arrows when "Plan" is on, else faint
   if (showPlan) {
     state.steps.forEach(s => {
@@ -2788,7 +2797,17 @@ function renderAnimAt(clock) {
     } else if (absT < s.waitEnd) {
       stepI = i; phase = "wait";
       const ent = state.nodes.get(s.entranceNodeId);
-      marker = { x: ent.x, y: ent.y, stroke: "#ff8a5c", scale: persistentScaleBefore(i), stretch: persistentStretchBefore(i) };
+      const a = state.attractions.get(s.attractionId);
+      let mx = ent.x, my = ent.y;
+      // if the ride has a queue path, snake through it over the wait: the avatar
+      // goes from the entrance to the queue's begin point, then along it to the
+      // load point. Otherwise it just waits at the entrance (previous behaviour).
+      if (a && Array.isArray(a.queue) && a.queue.length >= 2 && s.wait > 0) {
+        const frac = Math.max(0, Math.min(1, (absT - s.waitStart) / s.wait));
+        const p = pointAlong([{ x: ent.x, y: ent.y }, ...a.queue], frac);
+        mx = p.x; my = p.y;
+      }
+      marker = { x: mx, y: my, stroke: "#ff8a5c", scale: persistentScaleBefore(i), stretch: persistentStretchBefore(i) };
       info = "Waiting for " + s.name + " — " + Math.round(absT - s.waitStart) + "/" + Math.round(s.wait) + " min";
       break;
     } else if (absT < s.rideEnd) {
