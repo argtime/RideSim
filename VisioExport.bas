@@ -135,6 +135,11 @@ Option Explicit
 
 Private Const PPI As Double = 96#          ' pixels per inch (match your PNG export DPI)
 Private Const DEFAULT_RIDE As Double = 5#  ' fallback ride duration (minutes)
+' Path.Points flatness (inches): max gap between the approximating segments and the
+' true curve. Smaller = smoother curves / more points (0.005" ~= 0.5px). At 0.05 a
+' small ride circle flattened to ~8 sides (an octagon); this keeps curves smooth
+' even zoomed in. Only curved spans densify — straight runs stay two points.
+Private Const TRACK_FLATNESS As Double = 0.005
 Private Const OUT_FILE As String = "ridesim_export.txt"
 ' Full path to the park data file (park.js) to patch. Leave "" to derive it
 ' from the saved Visio doc + active page name: <docfolder>\parks\<page-slug>\park.js
@@ -1130,7 +1135,7 @@ Private Function TrackPointsJson(shp As Visio.Shape) As String
     ' vertices in the drawing to make a curve export smoothly.
     Dim pth As Visio.Path, arr() As Double, k As Long
     For Each pth In shp.Paths
-        Call pth.Points(0.05, arr)             ' flatness (inches); smaller = smoother curves; fills arr() ByRef
+        Call pth.Points(TRACK_FLATNESS, arr)   ' smaller flatness = smoother curves; fills arr() ByRef
         For k = LBound(arr) To UBound(arr) - 1 Step 2
             pts.Add Array(Round(arr(k) * PPI), Round((mPageH - arr(k + 1)) * PPI))
         Next k
