@@ -1118,10 +1118,15 @@ function resetView() { userZoom = 1; panX = 0; panY = 0; clampPan(); applyView()
 // attraction markers look oversized and overlap. Shrink them on the same
 // breakpoint the layout uses (re-evaluated each draw, so rotate/resize updates).
 const mobileMQ = window.matchMedia("(max-width: 820px)");
+// How much fixed-pixel map overlays (icons, ride-spin radii, the avatar) grow
+// with zoom. userZoom keeps them a constant size *relative to the map* — so at
+// fit they're the tuned base size, and zooming in enlarges them with the map.
+function uiZoom() { return userZoom; }
 function attrSize() {
+  const z = uiZoom();
   return mobileMQ.matches
-    ? { r: 5, hot: 6.5, font: 8 }
-    : { r: 8, hot: 10,  font: 10 };
+    ? { r: 5 * z, hot: 6.5 * z, font: 8 * z }
+    : { r: 8 * z, hot: 10 * z,  font: 10 * z };
 }
 
 // Background image placed in map space via an independent transform
@@ -1504,7 +1509,8 @@ function draw(marker) {
 
   // marker
   if (marker) {
-    const ms = marker.scale || 1;                 // avatar scales on rides or at restaurants/restrooms
+    const uz = uiZoom();                          // grow the avatar with zoom, like the icons
+    const ms = (marker.scale || 1) * uz;          // avatar scales on rides or at restaurants/restrooms
     const vs = marker.stretch || 1;               // vertical only: coasters stretch, indoor rides squash
     const AVATAR_PURPLE = "#9d7bff";              // always use ride purple for fill
     ctx.beginPath(); ctx.ellipse(tx(marker.x), ty(marker.y), 7 * ms, 7 * ms * vs, 0, 0, 7);
@@ -2778,7 +2784,7 @@ function renderAnimAt(clock) {
         const TAU = 2 * Math.PI, top = -Math.PI / 2;
         if (spin.type === "epi") {
           // spirograph: small circle rides a point on the big revolving circle
-          const Rbig = attrSize().r / scale, rSmall = 6 / scale;
+          const Rbig = attrSize().r / scale, rSmall = 6 * uiZoom() / scale;  // attrSize().r already grows with zoom
           const bigAng = top + spin.dir * frac * TAU * spin.revs;
           const smallAng = top + spin.dir * frac * TAU * spin.revs * spin.spins;
           marker = { x: disp.x + Rbig * Math.cos(bigAng) + rSmall * Math.cos(smallAng),
@@ -2791,9 +2797,9 @@ function renderAnimAt(clock) {
           const ang = top + spin.dir * f * TAU * loops;
           // default: just inside the rim; some rides pin a fixed radius, with a
           // smaller value on mobile where the icon is smaller.
-          const rPx = (mobileMQ.matches && spin.rPxMobile) ? spin.rPxMobile
-            : spin.rPxOverride ? spin.rPxOverride
-            : (attrSize().r - 4);
+          const rPx = (mobileMQ.matches && spin.rPxMobile) ? spin.rPxMobile * uiZoom()
+            : spin.rPxOverride ? spin.rPxOverride * uiZoom()
+            : (attrSize().r - 4);   // attrSize().r already grows with zoom
           const rMap = rPx / scale;
           marker = { x: disp.x + rMap * Math.cos(ang), y: disp.y + rMap * Math.sin(ang), stroke: strokeColor, scale: rideScale };
         }
@@ -3467,7 +3473,7 @@ canvas.addEventListener("wheel", bgWheel, { passive: false });
 function attractionAt(ev) {
   const rect = canvas.getBoundingClientRect();
   const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
-  let best = null, bestD = 12;
+  let best = null, bestD = 12 * uiZoom();   // grow the tap target with the (zoom-scaled) icons
   state.attractions.forEach(a => {
     if (!catFilter[attrCat(a)] && seqIndexOf(a.id) < 0) return;
     const loc = a.displayLocation || state.nodes.get(a.entranceNodeId);
