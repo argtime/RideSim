@@ -2543,6 +2543,7 @@ function refresh() {
 
 /* ---------- Animation --------------------------------------------------- */
 let animRAF = null, animClock = 0, playing = false, activeStepIndex = -1, lastFrameTime = 0;
+let followCam = true, camSnap = true;   // viewport chase-cam: follow the avatar while zoomed in during animation
 let seqHighlightIdx = -1;   // which sequence item is currently highlighted (avoids re-scrolling every frame)
 
 // Highlight the current stop in the sequence list and keep it scrolled into
@@ -2572,6 +2573,7 @@ function play() {
   if (!state.steps.length) return;
   clearSelection();   // drop any tap-selection highlight before animating
   playing = true;
+  followCam = true; camSnap = true;   // re-enable the chase-cam each time playback starts/resumes
   document.getElementById("playBtn").textContent = "⏸ Pause";
   if (animClock >= simSpanMin() - 0.001) animClock = 0;
   lastFrameTime = 0;
@@ -2714,6 +2716,20 @@ function persistentStretchBefore(stepIndex) {
   return p;
 }
 
+// Chase-cam: pan so the avatar sits at the viewport center. Smoothed (lerp) so a
+// ride's spin/orbit doesn't swirl the map; snaps instantly on the first frame of
+// playback. clampPan() keeps the map covering the viewport near the edges. No-op
+// at fit (userZoom === 1), where the whole map is already visible.
+function followAvatar(m) {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const targetX = w / 2 - (m.x * fitView.scale + fitView.ox) * userZoom;
+  const targetY = h / 2 - (m.y * fitView.scale + fitView.oy) * userZoom;
+  const k = camSnap ? 1 : 0.15;   // snap on the first frame, then ease (damps ride-spin wobble)
+  camSnap = false;
+  panX += (targetX - panX) * k;
+  panY += (targetY - panY) * k;
+  clampPan(); applyView();
+}
 function renderAnimAt(clock) {
   const base = state.steps[0].walkStart;
   const absT = base + clock;
@@ -2806,6 +2822,7 @@ function renderAnimAt(clock) {
     phase = "done"; info = "Day complete!";
   }
   activeStepIndex = stepI;
+  if (playing && followCam && userZoom > 1 && marker) followAvatar(marker);
   draw(marker);
 
   const np = document.getElementById("nowPlaying");
@@ -3517,7 +3534,7 @@ canvas.addEventListener("mousedown", (ev) => {
 window.addEventListener("mousemove", (ev) => {
   if (!vpStart) return;
   const dx = ev.clientX - vpStart.x, dy = ev.clientY - vpStart.y;
-  if (!vpPanning && Math.hypot(dx, dy) > 4) { vpPanning = true; hideSegTip(); canvas.style.cursor = "grabbing"; }
+  if (!vpPanning && Math.hypot(dx, dy) > 4) { vpPanning = true; followCam = false; hideSegTip(); canvas.style.cursor = "grabbing"; }
   if (vpPanning) { panX = vpStart.panX + dx; panY = vpStart.panY + dy; clampPan(); applyView(); draw(); }
 });
 window.addEventListener("mouseup", () => {
@@ -3560,7 +3577,7 @@ canvas.addEventListener("touchmove", (e) => {
     e.preventDefault();
   } else if (touchPan && e.touches.length === 1) {
     const t = e.touches[0], dx = t.clientX - touchPan.x, dy = t.clientY - touchPan.y;
-    if (!touchPan.moved && Math.hypot(dx, dy) > 6) { touchPan.moved = true; hideSegTip(); }
+    if (!touchPan.moved && Math.hypot(dx, dy) > 6) { touchPan.moved = true; followCam = false; hideSegTip(); }
     if (touchPan.moved) {
       panX = touchPan.panX + dx; panY = touchPan.panY + dy;
       clampPan(); applyView(); draw();
