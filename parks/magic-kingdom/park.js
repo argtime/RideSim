@@ -11,7 +11,7 @@ const SAMPLE = {};
 SAMPLE.meta = {
   name: "Magic Kingdom",
   emoji: "🏰",
-  background: "background.png",
+  background: "background.svg",
   thpwId: "75ea578a-adc8-4116-a54d-dccb60765ef9", // ThemeParks.wiki entity GUID (live waits + LL)
   queueTimesId: 6                                  // Queue-Times.com park id (snapshot workflow)
 };

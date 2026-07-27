@@ -1077,7 +1077,42 @@ function computeSequence() {
 /* ---------- Canvas rendering -------------------------------------------- */
 const canvas = document.getElementById("map");
 const ctx = canvas.getContext("2d");
-let view = { scale: 1, ox: 0, oy: 0 };
+let view = { scale: 1, ox: 0, oy: 0 };   // live transform: the fit composed with user zoom/pan
+// User zoom/pan layered on top of the fit-to-window baseline. userZoom === 1 means
+// the map is fit to the window; > 1 zooms in. Folding these into `view` keeps tx/ty,
+// screenToMap and every hit-test working unchanged — they only ever read `view`.
+let fitView = { scale: 1, ox: 0, oy: 0 };                 // fit-to-window baseline
+let fitBox = { minX: 0, minY: 0, maxX: 0, maxY: 0 };      // node+map bbox in map coords (pan clamp)
+let userZoom = 1, panX = 0, panY = 0;                     // panX/panY in screen px, applied after zoom
+const MAX_ZOOM = 6;
+function applyView() {
+  view.scale = fitView.scale * userZoom;
+  view.ox = fitView.ox * userZoom + panX;
+  view.oy = fitView.oy * userZoom + panY;
+}
+// Keep the map covering the viewport (no empty gutters) once zoomed past the fit.
+function clampPan() {
+  if (userZoom <= 1) { userZoom = 1; panX = 0; panY = 0; return; }
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const sMinX = (fitBox.minX * fitView.scale + fitView.ox) * userZoom;
+  const sMaxX = (fitBox.maxX * fitView.scale + fitView.ox) * userZoom;
+  const sMinY = (fitBox.minY * fitView.scale + fitView.oy) * userZoom;
+  const sMaxY = (fitBox.maxY * fitView.scale + fitView.oy) * userZoom;
+  panX = (sMaxX - sMinX >= w) ? Math.max(w - sMaxX, Math.min(-sMinX, panX)) : (w - sMinX - sMaxX) / 2;
+  panY = (sMaxY - sMinY >= h) ? Math.max(h - sMaxY, Math.min(-sMinY, panY)) : (h - sMinY - sMaxY) / 2;
+}
+// Zoom by `factor` about a canvas-relative screen point, keeping that point fixed.
+function zoomAt(sx, sy, factor) {
+  const prev = userZoom;
+  userZoom = Math.max(1, Math.min(MAX_ZOOM, userZoom * factor));
+  if (userZoom === prev) return;
+  const k = userZoom / prev;
+  panX = sx - (sx - panX) * k;
+  panY = sy - (sy - panY) * k;
+  clampPan();
+  applyView();
+}
+function resetView() { userZoom = 1; panX = 0; panY = 0; clampPan(); applyView(); draw(); }
 
 // On phones the map occupies far less screen space, so the fixed-size
 // attraction markers look oversized and overlap. Shrink them on the same
@@ -1120,7 +1155,13 @@ const TP_SOURCES = [
 const bgImg = new Image();
 let bgReady = false;
 bgImg.onload = () => { bgReady = true; applyMapExtent(); computeView(); draw(); };
-bgImg.onerror = () => { bgReady = false; };
+bgImg.onerror = () => {
+  // Fall back to background.png if the preferred image (e.g. an SVG not yet
+  // drawn) is missing — lets a park point at "background.svg" before the file
+  // exists and auto-upgrade once it's added.
+  if (!/(^|\/)background\.png$/.test(bgImg.src)) { console.warn("Background '" + bgImg.src + "' failed to load; falling back to background.png"); bgImg.src = "background.png"; return; }
+  bgReady = false;
+};
 bgImg.src = SAMPLE.meta.background || "background.png";
 // When the Visio export provides a map extent (in node coords), stretch the
 // background to exactly that rectangle — resolution-independent alignment.
@@ -1163,7 +1204,14 @@ function bgMove(ev) {
 }
 function bgUp() { if (bgDragging) { bgDragging = false; saveBg(); } }
 function bgWheel(ev) {
-  if (!bgAdjust || !bgReady) return;
+  if (!bgAdjust) {                          // normal mode: zoom the whole viewport
+    ev.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    zoomAt(ev.clientX - rect.left, ev.clientY - rect.top, ev.deltaY < 0 ? 1.1 : 1 / 1.1);
+    draw();
+    return;
+  }
+  if (!bgReady) return;                     // Align-Map mode: scale the background image
   ev.preventDefault();
   const m = screenToMap(ev);
   const s2 = Math.max(0.01, bg.scale * (ev.deltaY < 0 ? 1.05 : 1 / 1.05));
@@ -1201,7 +1249,11 @@ function computeView() {
     minX = Math.min(minX, e.x); minY = Math.min(minY, e.y);
     maxX = Math.max(maxX, e.x + e.w); maxY = Math.max(maxY, e.y + e.h);
   }
-  if (!isFinite(minX)) { view = { scale: 1, ox: 0, oy: 0 }; return; }
+  if (!isFinite(minX)) {
+    fitView = { scale: 1, ox: 0, oy: 0 }; fitBox = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+    applyView(); return;
+  }
+  fitBox = { minX, minY, maxX, maxY };
   const w = canvas.clientWidth, h = canvas.clientHeight;
   // Pad by ~6% of each dimension, capped at 70px. A fixed 70px would swallow a
   // short/narrow canvas (e.g. a phone in landscape, which is wider than the
@@ -1211,9 +1263,11 @@ function computeView() {
   const sx = (w - padX * 2) / Math.max(1, maxX - minX);
   const sy = (h - padY * 2) / Math.max(1, maxY - minY);
   const scale = Math.min(sx, sy);
-  view.scale = scale;
-  view.ox = padX - minX * scale + (w - padX * 2 - (maxX - minX) * scale) / 2;
-  view.oy = padY - minY * scale + (h - padY * 2 - (maxY - minY) * scale) / 2;
+  fitView.scale = scale;
+  fitView.ox = padX - minX * scale + (w - padX * 2 - (maxX - minX) * scale) / 2;
+  fitView.oy = padY - minY * scale + (h - padY * 2 - (maxY - minY) * scale) / 2;
+  clampPan();      // re-clamp the existing pan for the new fit (preserves zoom across resize)
+  applyView();
 }
 function tx(x) { return x * view.scale + view.ox; }
 function ty(y) { return y * view.scale + view.oy; }
@@ -3272,6 +3326,12 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "ArrowUp") { e.preventDefault(); moveSelection(-1); }
   else if (e.key === "ArrowDown") { e.preventDefault(); moveSelection(1); }
 });
+// Escape / "0" resets the map zoom back to fit-to-window.
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
+  if ((e.key === "Escape" || e.key === "0") && userZoom > 1) { e.preventDefault(); resetView(); }
+});
 function setStartNow() {
   const d = new Date();
   document.getElementById("startTime").value =
@@ -3426,7 +3486,82 @@ function overLabel(ev) {
   const bot = Math.max(labelHit.y + labelHit.h, labelHit.nodeY) + pad;
   return p.x >= labelHit.x - pad && p.x <= labelHit.x + labelHit.w + pad && p.y >= top && p.y <= bot;
 }
+// ---- Drag-to-pan the zoomed-in map (normal mode only, once zoomed past fit) ----
+let vpStart = null, vpPanning = false, vpClickSuppressed = false;
+let touchActive = false;                 // a touch gesture owns the canvas — ignore emulated mouse
+canvas.addEventListener("mousedown", (ev) => {
+  if (touchActive) return;               // emulated from touch; the touch handlers drive pan
+  if (ev.button !== 0 || addMode || bgAdjust || userZoom <= 1) return;
+  vpStart = { x: ev.clientX, y: ev.clientY, panX, panY };
+  vpPanning = false;
+});
+window.addEventListener("mousemove", (ev) => {
+  if (!vpStart) return;
+  const dx = ev.clientX - vpStart.x, dy = ev.clientY - vpStart.y;
+  if (!vpPanning && Math.hypot(dx, dy) > 4) { vpPanning = true; hideSegTip(); canvas.style.cursor = "grabbing"; }
+  if (vpPanning) { panX = vpStart.panX + dx; panY = vpStart.panY + dy; clampPan(); applyView(); draw(); }
+});
+window.addEventListener("mouseup", () => {
+  if (vpStart && vpPanning) vpClickSuppressed = true;   // swallow the click that ends a pan drag
+  vpStart = null; vpPanning = false; canvas.style.cursor = "";
+});
+// ---- Touch: two-finger pinch-to-zoom, one-finger drag-to-pan (when zoomed) ----
+let pinch = null;      // active 2-finger gesture: { startDist, startZoom, mapX, mapY }
+let touchPan = null;   // active 1-finger pan: { x, y, panX, panY, moved }
+function touchMid(a, b) { const r = canvas.getBoundingClientRect(); return { x: (a.clientX + b.clientX) / 2 - r.left, y: (a.clientY + b.clientY) / 2 - r.top }; }
+canvas.addEventListener("touchstart", (e) => {
+  vpClickSuppressed = false;             // fresh gesture; a lingering flag must not eat this tap
+  touchActive = true;
+  if (addMode || bgAdjust) return;       // those modes keep their own (emulated) handling
+  if (e.touches.length === 2) {
+    touchPan = null;
+    const a = e.touches[0], b = e.touches[1], m = touchMid(a, b);
+    pinch = {
+      startDist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
+      startZoom: userZoom,
+      mapX: (m.x - view.ox) / view.scale,   // map point under the pinch midpoint (stays anchored)
+      mapY: (m.y - view.oy) / view.scale
+    };
+    e.preventDefault();
+  } else if (e.touches.length === 1 && userZoom > 1) {
+    const t = e.touches[0];
+    touchPan = { x: t.clientX, y: t.clientY, panX, panY, moved: false };
+    // no preventDefault yet: a stationary touch should still fall through to tap-to-add
+  }
+}, { passive: false });
+canvas.addEventListener("touchmove", (e) => {
+  if (pinch && e.touches.length >= 2) {
+    const a = e.touches[0], b = e.touches[1], m = touchMid(a, b);
+    const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    userZoom = Math.max(1, Math.min(MAX_ZOOM, pinch.startZoom * (dist / pinch.startDist)));
+    // keep the initial focal map point pinned under the current finger midpoint
+    panX = m.x - (pinch.mapX * fitView.scale + fitView.ox) * userZoom;
+    panY = m.y - (pinch.mapY * fitView.scale + fitView.oy) * userZoom;
+    clampPan(); applyView(); draw();
+    e.preventDefault();
+  } else if (touchPan && e.touches.length === 1) {
+    const t = e.touches[0], dx = t.clientX - touchPan.x, dy = t.clientY - touchPan.y;
+    if (!touchPan.moved && Math.hypot(dx, dy) > 6) { touchPan.moved = true; hideSegTip(); }
+    if (touchPan.moved) {
+      panX = touchPan.panX + dx; panY = touchPan.panY + dy;
+      clampPan(); applyView(); draw();
+      e.preventDefault();               // now we own the gesture: no page scroll, no trailing tap
+    }
+  }
+}, { passive: false });
+canvas.addEventListener("touchend", (e) => {
+  if (pinch || (touchPan && touchPan.moved)) vpClickSuppressed = true;  // swallow the tap that ends a gesture
+  if (e.touches.length === 0) {
+    pinch = null; touchPan = null;
+    setTimeout(() => { touchActive = false; }, 350);   // let emulated mouse/click settle first
+  } else if (e.touches.length === 1 && pinch) {         // lifted one finger of a pinch -> keep panning
+    const t = e.touches[0]; pinch = null;
+    touchPan = userZoom > 1 ? { x: t.clientX, y: t.clientY, panX, panY, moved: true } : null;
+  }
+}, { passive: true });
+canvas.addEventListener("touchcancel", () => { pinch = null; touchPan = null; setTimeout(() => { touchActive = false; }, 350); }, { passive: true });
 canvas.addEventListener("mousemove", (ev) => {
+  if (vpPanning) return;                                 // panning — skip hover work
   if (addMode || bgAdjust) {
     if (hoverAttr || hoverStep !== null) { hoverAttr = null; hoverStep = null; draw(); }
     hideSegTip(); canvas.style.cursor = ""; return;
@@ -3435,7 +3570,7 @@ canvas.addEventListener("mousemove", (ev) => {
   if (overLabel(ev)) { canvas.style.cursor = "pointer"; hideSegTip(); return; }
   const id = attractionAt(ev);
   const seg = id ? null : segmentAt(ev);      // attraction circle takes priority
-  canvas.style.cursor = (id || seg !== null) ? "pointer" : "";
+  canvas.style.cursor = (id || seg !== null) ? "pointer" : (userZoom > 1 ? "grab" : "");
   if (seg !== null) showSegTip(seg, ev); else hideSegTip();
   if (id !== hoverAttr || seg !== hoverStep) { hoverAttr = id; hoverStep = seg; draw(); }
 });
@@ -3444,6 +3579,7 @@ canvas.addEventListener("mousemove", (ev) => {
 // deselect — important on mobile, where there's no hover to swap bubbles);
 // (3) tap empty space -> close the open bubble.
 canvas.addEventListener("click", (ev) => {
+  if (vpClickSuppressed) { vpClickSuppressed = false; return; }   // this click ended a pan drag
   if (addMode || bgAdjust) return;
   const p = canvasXY(ev);
   if (labelHit && p.x >= labelHit.x && p.x <= labelHit.x + labelHit.w && p.y >= labelHit.y && p.y <= labelHit.y + labelHit.h) {

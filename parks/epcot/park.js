@@ -11,7 +11,7 @@ const SAMPLE = {};
 SAMPLE.meta = {
   name: "Epcot",
   emoji: "🌐",
-  background: "background.png",
+  background: "background.svg",   // falls back to background.png until the SVG is drawn
   thpwId: "47f90d2c-e191-4239-a466-5892ef59a88b", // ThemeParks.wiki entity GUID (live waits + LL)
   queueTimesId: 5                                  // Queue-Times.com park id (snapshot workflow)
 };
