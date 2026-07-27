@@ -1505,11 +1505,12 @@ function draw(marker) {
   // marker
   if (marker) {
     const ms = marker.scale || 1;                 // avatar scales on rides or at restaurants/restrooms
+    const vs = marker.stretch || 1;               // vertical only: coasters stretch, indoor rides squash
     const AVATAR_PURPLE = "#9d7bff";              // always use ride purple for fill
-    ctx.beginPath(); ctx.arc(tx(marker.x), ty(marker.y), 7 * ms, 0, 7);
+    ctx.beginPath(); ctx.ellipse(tx(marker.x), ty(marker.y), 7 * ms, 7 * ms * vs, 0, 0, 7);
     ctx.fillStyle = AVATAR_PURPLE; ctx.fill();
     ctx.lineWidth = 2; ctx.strokeStyle = marker.stroke || "#5cc8ff"; ctx.stroke();
-    ctx.beginPath(); ctx.arc(tx(marker.x), ty(marker.y), 11 * ms, 0, 7);
+    ctx.beginPath(); ctx.ellipse(tx(marker.x), ty(marker.y), 11 * ms, 11 * ms * vs, 0, 0, 7);
     ctx.strokeStyle = marker.stroke || "#5cc8ff"; ctx.globalAlpha = .4; ctx.stroke(); ctx.globalAlpha = 1;
   }
   drawMyLocation();   // "you are here" GPS dot, on top
@@ -2700,6 +2701,18 @@ function persistentScaleBefore(stepIndex) {
   for (let i = 0; i < stepIndex && i < state.steps.length; i++) p *= avatarFactor(state.steps[i].category);
   return p;
 }
+// Same idea vertically: each coaster stretches the avatar 20% taller, each
+// indoor (shaded) ride squashes it 20% shorter, compounding across the day.
+function stretchFactor(s) {
+  if (s.category !== "ride") return 1;
+  const a = state.attractions.get(s.attractionId);
+  return (a && a.coaster) ? 1.2 : insideR(a) ? 0.8 : 1;
+}
+function persistentStretchBefore(stepIndex) {
+  let p = 1;
+  for (let i = 0; i < stepIndex && i < state.steps.length; i++) p *= stretchFactor(state.steps[i]);
+  return p;
+}
 
 function renderAnimAt(clock) {
   const base = state.steps[0].walkStart;
@@ -2714,13 +2727,13 @@ function renderAnimAt(clock) {
       const p = pointAlong(s.routeCoords, frac);
       // on a transit segment? (spans are length-fractions of the drawn route)
       const span = (s.transitSpans || []).find(sp => frac >= sp.a && frac <= sp.b);
-      marker = { x: p.x, y: p.y, stroke: span ? TRANSIT_COLOR : "#5cc8ff", scale: persistentScaleBefore(i) };
+      marker = { x: p.x, y: p.y, stroke: span ? TRANSIT_COLOR : "#5cc8ff", scale: persistentScaleBefore(i), stretch: persistentStretchBefore(i) };
       info = span ? ("🚂 " + span.lineName + " → " + stopName(span.toStop)) : ("Walking to " + s.name);
       break;
     } else if (absT < s.waitEnd) {
       stepI = i; phase = "wait";
       const ent = state.nodes.get(s.entranceNodeId);
-      marker = { x: ent.x, y: ent.y, stroke: "#ff8a5c", scale: persistentScaleBefore(i) };
+      marker = { x: ent.x, y: ent.y, stroke: "#ff8a5c", scale: persistentScaleBefore(i), stretch: persistentStretchBefore(i) };
       info = "Waiting for " + s.name + " — " + Math.round(absT - s.waitStart) + "/" + Math.round(s.wait) + " min";
       break;
     } else if (absT < s.rideEnd) {
@@ -2776,6 +2789,12 @@ function renderAnimAt(clock) {
       } else {
         marker = { x: disp.x, y: disp.y, stroke: strokeColor, scale: rideScale };
       }
+      // coasters stretch the avatar vertically; indoor (shaded) rides squash it.
+      // Like the restaurant/restroom size, the change eases in over the ride and
+      // the new height carries forward for the rest of the day.
+      const sBase = persistentStretchBefore(i);
+      const gs = s.ride > 0 ? Math.max(0, Math.min(1, (absT - s.rideStart) / s.ride)) : 1;
+      marker.stretch = sBase * (1 + (stretchFactor(s) - 1) * gs);
       info = meta.anim + s.name;
       break;
     }
@@ -2783,7 +2802,7 @@ function renderAnimAt(clock) {
   if (stepI < 0) {
     const s = state.steps[state.steps.length - 1];
     const ex = state.nodes.get(s.exitNodeId);
-    marker = { x: ex.x, y: ex.y, stroke: "#5fd38a", scale: persistentScaleBefore(state.steps.length) };
+    marker = { x: ex.x, y: ex.y, stroke: "#5fd38a", scale: persistentScaleBefore(state.steps.length), stretch: persistentStretchBefore(state.steps.length) };
     phase = "done"; info = "Day complete!";
   }
   activeStepIndex = stepI;
