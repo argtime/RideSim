@@ -1085,6 +1085,7 @@ let fitView = { scale: 1, ox: 0, oy: 0 };                 // fit-to-window basel
 let fitBox = { minX: 0, minY: 0, maxX: 0, maxY: 0 };      // node+map bbox in map coords (pan clamp)
 let userZoom = 1, panX = 0, panY = 0;                     // panX/panY in screen px, applied after zoom
 const MAX_ZOOM = 6;
+const LABEL_ZOOM = 2.5;   // zoom at which attraction names fade in below their circles (~halfway to max)
 function applyView() {
   view.scale = fitView.scale * userZoom;
   view.ox = fitView.ox * userZoom + panX;
@@ -1293,6 +1294,36 @@ function resizeCanvas() {
   draw();
 }
 
+// Once zoomed past LABEL_ZOOM, draw each visible attraction's name centred below
+// its circle (fading in over a short range so it doesn't pop). Skips minor POIs
+// (pins/other/restrooms) and off-screen circles; while animating, only plan stops
+// are shown — matching which circles draw(). Rendered after the circles so names
+// sit on top. Font grows sub-linearly (sqrt) so text stays legible, not huge.
+function drawZoomedNames() {
+  if (userZoom < LABEL_ZOOM) return;
+  const alpha = Math.max(0, Math.min(1, (userZoom - LABEL_ZOOM) / 0.6));
+  if (alpha <= 0) return;
+  const w = canvas.clientWidth, h = canvas.clientHeight, sz = attrSize();
+  const fs = 10 * Math.sqrt(userZoom);
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.font = "600 " + fs.toFixed(1) + "px -apple-system,Segoe UI,Roboto,sans-serif";
+  ctx.lineWidth = Math.max(2, fs * 0.28); ctx.lineJoin = "round";
+  state.attractions.forEach(a => {
+    const inSeq = seqIndexOf(a.id), cat = attrCat(a);
+    if (!catFilter[cat] && inSeq < 0) return;      // filtered out
+    if (playing && inSeq < 0) return;              // while animating, only plan stops
+    if (cat === "pin" || cat === "other" || cat === "restroom") return;  // minor POIs: no name
+    const loc = a.displayLocation || state.nodes.get(a.entranceNodeId);
+    if (!loc) return;
+    const X = tx(loc.x), Y = ty(loc.y);
+    if (X < -60 || X > w + 60 || Y < -20 || Y > h + 40) return;   // only what's on screen
+    const labelY = Y + sz.r + Math.max(3, fs * 0.35);
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = "rgba(8,15,25,0.9)"; ctx.strokeText(a.name || a.id, X, labelY);   // dark halo for legibility
+    ctx.fillStyle = "#eaf2ff"; ctx.fillText(a.name || a.id, X, labelY);
+    ctx.globalAlpha = 1;
+  });
+}
 function draw(marker) {
   const w = canvas.clientWidth, h = canvas.clientHeight;
   labelHit = null;                 // re-established below if a hover label is drawn
@@ -1474,6 +1505,8 @@ function draw(marker) {
   });
 
   drawShelters("over");   // pink shade (panel expanded) + flashes — above the icons, below labels/avatar
+
+  drawZoomedNames();      // attraction names below their circles, once zoomed in far enough
 
   if (hoverAttr) {
     const a = state.attractions.get(hoverAttr);
