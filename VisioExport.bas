@@ -841,9 +841,9 @@ End Function
 Private Function PolygonPointsJson(shp As Visio.Shape) As String
     Dim pts As Collection: Set pts = New Collection
     On Error Resume Next
-    Dim pth As Visio.Path, arr As Variant, k As Long
+    Dim pth As Visio.Path, arr() As Double, k As Long
     For Each pth In shp.Paths
-        arr = pth.Points(0.05)                 ' flatness (inches); small = smoother curves
+        Call pth.Points(0.05, arr)             ' flatness (inches); small = smoother curves; fills arr() ByRef
         For k = LBound(arr) To UBound(arr) - 1 Step 2
             pts.Add Array(Round(arr(k) * PPI), Round((mPageH - arr(k + 1)) * PPI))
         Next k
@@ -1128,9 +1128,9 @@ Private Function TrackPointsJson(shp As Visio.Shape) As String
     ' Shape.Paths returns the flattened outline in page coordinates, so curves
     ' (arcs, splines) come through as points automatically — no need to hand-add
     ' vertices in the drawing to make a curve export smoothly.
-    Dim pth As Visio.Path, arr As Variant, k As Long
+    Dim pth As Visio.Path, arr() As Double, k As Long
     For Each pth In shp.Paths
-        arr = pth.Points(0.05)                 ' flatness (inches); smaller = smoother curves
+        Call pth.Points(0.05, arr)             ' flatness (inches); smaller = smoother curves; fills arr() ByRef
         For k = LBound(arr) To UBound(arr) - 1 Step 2
             pts.Add Array(Round(arr(k) * PPI), Round((mPageH - arr(k + 1)) * PPI))
         Next k
