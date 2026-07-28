@@ -2625,6 +2625,7 @@ function refresh() {
 /* ---------- Animation --------------------------------------------------- */
 let animRAF = null, animClock = 0, playing = false, activeStepIndex = -1, lastFrameTime = 0;
 let followCam = true, camSnap = true;   // viewport chase-cam: follow the avatar while zoomed in during animation
+let sunScrubbing = false;               // true while dragging the sun bar to scrub the animation
 let seqHighlightIdx = -1;   // which sequence item is currently highlighted (avoids re-scrolling every frame)
 
 // Highlight the current stop in the sequence list and keep it scrolled into
@@ -2900,7 +2901,7 @@ function renderAnimAt(clock) {
     phase = "done"; info = "Day complete!";
   }
   activeStepIndex = stepI;
-  if (playing && followCam && userZoom > 1 && marker) followAvatar(marker);
+  if ((playing || sunScrubbing) && followCam && userZoom > 1 && marker) followAvatar(marker);
   draw(marker);
 
   const np = document.getElementById("nowPlaying");
@@ -3446,6 +3447,46 @@ document.addEventListener("keydown", (e) => {
   if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) return;
   if ((e.key === "Escape" || e.key === "0") && userZoom > 1) { e.preventDefault(); resetView(); }
 });
+// ---- Scrub the animation by dragging on the sun bar ----------------------
+// The bar is linear in clock time and the plan is a contiguous slice of it, so a
+// drag maps 1:1 to the sim clock (clamped to the plan). A plain click still
+// selects a step; only a drag scrubs. Scrubbing pauses playback; Play resumes.
+let sunScrub = null, sunScrubSuppressClick = false;
+function sunFrac(clientX) {
+  const track = document.querySelector("#sunFooter .sf-track");
+  if (!track) return null;
+  const r = track.getBoundingClientRect();
+  return r.width ? Math.max(0, Math.min(1, (clientX - r.left) / r.width)) : null;
+}
+function sunScrubTo(clientX) {
+  if (!state.steps.length) return;
+  const f = sunFrac(clientX); if (f == null) return;
+  const base = state.steps[0].walkStart;
+  animClock = Math.max(0, Math.min(simSpanMin(), f * 1440 - base));
+  camSnap = true;                         // keep the avatar centred while scrubbing (when zoomed)
+  renderAnimAt(animClock);
+  updateSunNow(base + animClock);
+}
+(function wireSunScrub() {
+  const el = document.getElementById("sunFooter"); if (!el) return;
+  el.addEventListener("mousedown", (e) => { if (e.button === 0 && state.steps.length) sunScrub = { x: e.clientX, moved: false }; });
+  window.addEventListener("mousemove", (e) => {
+    if (!sunScrub) return;
+    if (!sunScrub.moved && Math.abs(e.clientX - sunScrub.x) > 4) { sunScrub.moved = true; sunScrubbing = true; if (playing) pause(); }
+    if (sunScrub.moved) sunScrubTo(e.clientX);
+  });
+  window.addEventListener("mouseup", () => { if (sunScrub && sunScrub.moved) sunScrubSuppressClick = true; sunScrub = null; sunScrubbing = false; });
+  el.addEventListener("touchstart", (e) => { if (state.steps.length) sunScrub = { x: e.touches[0].clientX, moved: false }; }, { passive: true });
+  el.addEventListener("touchmove", (e) => {
+    if (!sunScrub) return;
+    const cx = e.touches[0].clientX;
+    if (!sunScrub.moved && Math.abs(cx - sunScrub.x) > 6) { sunScrub.moved = true; sunScrubbing = true; if (playing) pause(); }
+    if (sunScrub.moved) { e.preventDefault(); sunScrubTo(cx); }
+  }, { passive: false });
+  el.addEventListener("touchend", () => { if (sunScrub && sunScrub.moved) sunScrubSuppressClick = true; sunScrub = null; sunScrubbing = false; }, { passive: true });
+  // swallow the click that ends a scrub drag so it doesn't also select a step
+  el.addEventListener("click", (e) => { if (sunScrubSuppressClick) { sunScrubSuppressClick = false; e.stopPropagation(); e.preventDefault(); } }, true);
+})();
 function setStartNow() {
   const d = new Date();
   document.getElementById("startTime").value =
