@@ -1317,10 +1317,18 @@ function drawZoomedNames() {
     if (!loc) return;
     const X = tx(loc.x), Y = ty(loc.y);
     if (X < -60 || X > w + 60 || Y < -20 || Y > h + 40) return;   // only what's on screen
-    const labelY = Y + sz.r + Math.max(3, fs * 0.35);
+    const rEdge = Y + sz.r;                          // bottom of the circle
+    const labelY = rEdge + Math.max(7, fs * 0.7);    // gap leaves room for the leader stem
+    const name = a.name || a.id;
     ctx.globalAlpha = alpha;
-    ctx.strokeStyle = "rgba(8,15,25,0.9)"; ctx.strokeText(a.name || a.id, X, labelY);   // dark halo for legibility
-    ctx.fillStyle = "#eaf2ff"; ctx.fillText(a.name || a.id, X, labelY);
+    // leader stem from the circle down to the label (dark halo + light core, like the text)
+    ctx.beginPath(); ctx.moveTo(X, rEdge); ctx.lineTo(X, labelY - Math.max(2, fs * 0.12));
+    ctx.strokeStyle = "rgba(8,15,25,0.85)"; ctx.lineWidth = Math.max(2, fs * 0.14); ctx.stroke();
+    ctx.strokeStyle = "rgba(234,242,255,0.95)"; ctx.lineWidth = Math.max(1, fs * 0.07); ctx.stroke();
+    // name
+    ctx.lineWidth = Math.max(1.5, fs * 0.14);
+    ctx.strokeStyle = "rgba(8,15,25,0.9)"; ctx.strokeText(name, X, labelY);   // dark halo for legibility
+    ctx.fillStyle = "#eaf2ff"; ctx.fillText(name, X, labelY);
     ctx.globalAlpha = 1;
   });
 }
