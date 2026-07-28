@@ -44,27 +44,33 @@ function attrDuration(a) {
 }
 // Closed = not open at the park today; shown as a flat gray circle.
 function attrClosed(a) { return !!(a && a.closed); }
-const CLOSED_COLOR = "#6b7687";
-const LL_COLOR = "#ffd23b";   // gold — Lightning Lane countdown fill + bolt badge
-const TRANSIT_COLOR = "#46c6b8";   // teal — transit (rail/ferry) legs on the map + timeline
+// Colors are read from the CSS palette (:root in app.css) so there's ONE place
+// to tweak them. Read once at load — app.js runs after the stylesheet is parsed,
+// so getComputedStyle already sees the custom properties.
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const CLOSED_COLOR = cssVar("--icon-closed");
+const LL_COLOR = cssVar("--ll");            // gold — Lightning Lane countdown fill + bolt badge
+const TRANSIT_COLOR = cssVar("--transit");  // teal — transit (rail/ferry) legs on the map + timeline
+const AVATAR_COLOR = cssVar("--avatar");    // the little rider dot
+const WAIT_SCALE = ["--wait1", "--wait2", "--wait3", "--wait4", "--wait5"].map(cssVar);  // short -> long
 // Marker colors per category: { off: not in sequence, on: in sequence }.
 const ATTR_COLORS = {
-  ride:       { off: "#ffcc4d", on: "#5cc8ff" },
-  restaurant: { off: "#57d9a3", on: "#2bb487" },
-  shop:       { off: "#c08cff", on: "#9b6bff" },
-  pin:        { off: "#ff8aa8", on: "#ff5d86" },
-  restroom:   { off: "#6cb8e6", on: "#3a93d6" },
-  other:      { off: "#9aa7bd", on: "#6d7d99" }
+  ride:       { off: cssVar("--icon-ride-off"),       on: cssVar("--icon-ride-on") },
+  restaurant: { off: cssVar("--icon-restaurant-off"), on: cssVar("--icon-restaurant-on") },
+  shop:       { off: cssVar("--icon-shop-off"),       on: cssVar("--icon-shop-on") },
+  pin:        { off: cssVar("--icon-pin-off"),        on: cssVar("--icon-pin-on") },
+  restroom:   { off: cssVar("--icon-restroom-off"),   on: cssVar("--icon-restroom-on") },
+  other:      { off: cssVar("--icon-other-off"),      on: cssVar("--icon-other-on") }
 };
 // Per-category labels/markers used by the timeline, itinerary and animation.
 const CAT_META = {
-  ride:       { verb: "Ride ",    short: "Ride", phase: "RIDE", cls: "ride", anim: "🎢 Riding ",      barVar: "var(--ride)", color: "#9d7bff", wait: true },
-  restaurant: { verb: "Eat at ",  short: "Eat",  phase: "DINE", cls: "dine", anim: "🍽 Eating at ",   barVar: "var(--rest)", color: "#57d9a3", wait: false },
-  shop:       { verb: "Shop at ", short: "Shop", phase: "SHOP", cls: "shop", anim: "🛍 Shopping at ", barVar: "var(--shop)", color: "#c08cff", wait: false },
-  pin:        { verb: "Visit ",   short: "Stop", phase: "STOP", cls: "pin",  anim: "📍 Visiting ",    barVar: "var(--pin)",  color: "#ff8aa8", wait: false },
-  restroom:   { verb: "Break at ", short: "Break", phase: "BREAK", cls: "restroom", anim: "🚻 Break at ", barVar: "var(--restroom)", color: "#6cb8e6", wait: false, icon: "🚻", iconNode: true },
-  other:      { verb: "Stop at ",  short: "Stop", phase: "STOP", cls: "other", anim: "⏱ At ", barVar: "var(--other)", color: "#9aa7bd", wait: false },
-  transit:    { verb: "Take ",     short: "Transit", phase: "TRANSIT", cls: "transit", anim: "🚂 ", barVar: "var(--transit)", color: "#46c6b8", wait: false }
+  ride:       { verb: "Ride ",    short: "Ride", phase: "RIDE", cls: "ride", anim: "🎢 Riding ",      barVar: "var(--ride)", color: cssVar("--ride"), wait: true },
+  restaurant: { verb: "Eat at ",  short: "Eat",  phase: "DINE", cls: "dine", anim: "🍽 Eating at ",   barVar: "var(--rest)", color: cssVar("--rest"), wait: false },
+  shop:       { verb: "Shop at ", short: "Shop", phase: "SHOP", cls: "shop", anim: "🛍 Shopping at ", barVar: "var(--shop)", color: cssVar("--shop"), wait: false },
+  pin:        { verb: "Visit ",   short: "Stop", phase: "STOP", cls: "pin",  anim: "📍 Visiting ",    barVar: "var(--pin)",  color: cssVar("--pin"), wait: false },
+  restroom:   { verb: "Break at ", short: "Break", phase: "BREAK", cls: "restroom", anim: "🚻 Break at ", barVar: "var(--restroom)", color: cssVar("--restroom"), wait: false, icon: "🚻", iconNode: true },
+  other:      { verb: "Stop at ",  short: "Stop", phase: "STOP", cls: "other", anim: "⏱ At ", barVar: "var(--other)", color: cssVar("--other"), wait: false },
+  transit:    { verb: "Take ",     short: "Transit", phase: "TRANSIT", cls: "transit", anim: "🚂 ", barVar: "var(--transit)", color: cssVar("--transit"), wait: false }
 };
 // A sequence entry "@transit:<lineId>" (optionally ">@<alightStopId>") schedules
 // an explicit transit ride. Board = nearest stop; alight = chosen, else auto.
@@ -1325,6 +1331,11 @@ function drawZoomedNames() {
     ctx.beginPath(); ctx.moveTo(X, rEdge); ctx.lineTo(X, labelY - Math.max(2, fs * 0.12));
     ctx.strokeStyle = "rgba(8,15,25,0.85)"; ctx.lineWidth = Math.max(2, fs * 0.14); ctx.stroke();
     ctx.strokeStyle = "rgba(234,242,255,0.95)"; ctx.lineWidth = Math.max(1, fs * 0.07); ctx.stroke();
+    // pin dot where the leader meets the node
+    const dotR = Math.max(1.8, fs * 0.13);
+    ctx.beginPath(); ctx.arc(X, rEdge, dotR, 0, 7);
+    ctx.lineWidth = Math.max(1, fs * 0.07); ctx.strokeStyle = "rgba(8,15,25,0.85)";
+    ctx.fillStyle = "rgba(234,242,255,0.95)"; ctx.fill(); ctx.stroke();
     // name
     ctx.lineWidth = Math.max(1.5, fs * 0.14);
     ctx.strokeStyle = "rgba(8,15,25,0.9)"; ctx.strokeText(name, X, labelY);   // dark halo for legibility
@@ -1561,7 +1572,7 @@ function draw(marker) {
   if (marker) {
     const uz = uiZoom();                          // grow the avatar with zoom, like the icons
     const ms = (marker.scale || 1) * uz;          // avatar scales on rides or at restaurants/restrooms
-    const AVATAR_PURPLE = "#9d7bff";              // always use ride purple for fill
+    const AVATAR_PURPLE = AVATAR_COLOR;           // ride purple — tweak --avatar in the CSS palette
     ctx.beginPath(); ctx.arc(tx(marker.x), ty(marker.y), 7 * ms, 0, 7);
     ctx.fillStyle = AVATAR_PURPLE; ctx.fill();
     ctx.lineWidth = 2; ctx.strokeStyle = marker.stroke || "#5cc8ff"; ctx.stroke();
@@ -1754,11 +1765,11 @@ function llMinutesUntil(ll) {
   return Math.max(0, Math.round((d.getTime() - Date.now()) / 60000));
 }
 function waitColor(w) {
-  if (w <= 15) return "#3fae5a";
-  if (w <= 30) return "#86b300";
-  if (w <= 45) return "#e0a020";
-  if (w <= 75) return "#e0651f";
-  return "#d23b3b";
+  if (w <= 15) return WAIT_SCALE[0];
+  if (w <= 30) return WAIT_SCALE[1];
+  if (w <= 45) return WAIT_SCALE[2];
+  if (w <= 75) return WAIT_SCALE[3];
+  return WAIT_SCALE[4];
 }
 // small sequence-order badge at a circle's upper-right (when waits take the center)
 function drawSeqBadge(X, Y, r, n) {

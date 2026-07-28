@@ -1,9 +1,20 @@
+  /* =========================================================================
+     COLOR PALETTE — the single place to tweak colors. Both the UI (via var(--x))
+     and the map canvas (app.js reads these at load) pull from here.
+     ========================================================================= */
   :root {
+    /* -- UI chrome -------------------------------------------------------- */
     --bg: #0f1420;
     --panel: #1a2233;
     --panel2: #222d44;
     --accent: #5cc8ff;
     --accent2: #ffcc4d;
+    --text: #e6ecf5;
+    --muted: #8a98b0;
+    --good: #5fd38a;
+    --border: #2c3850;
+
+    /* -- Category colors (attraction list chips, timeline bars, avatar) --- */
     --walk: #5cc8ff;
     --wait: #ff8a5c;
     --ride: #9d7bff;
@@ -13,10 +24,26 @@
     --restroom: #6cb8e6;
     --other: #9aa7bd;
     --transit: #46c6b8;
-    --text: #e6ecf5;
-    --muted: #8a98b0;
-    --good: #5fd38a;
-    --border: #2c3850;
+
+    /* -- Map icon fills — off = not in your plan, on = in your plan ------- */
+    --icon-ride-off: #ffcc4d;       --icon-ride-on: #5cc8ff;
+    --icon-restaurant-off: #57d9a3; --icon-restaurant-on: #2bb487;
+    --icon-shop-off: #c08cff;       --icon-shop-on: #9b6bff;
+    --icon-pin-off: #ff8aa8;        --icon-pin-on: #ff5d86;
+    --icon-restroom-off: #6cb8e6;   --icon-restroom-on: #3a93d6;
+    --icon-other-off: #9aa7bd;      --icon-other-on: #6d7d99;
+
+    /* -- Map status + avatar --------------------------------------------- */
+    --icon-closed: #6b7687;         /* ride closed today */
+    --ll: #ffd23b;                  /* Lightning Lane gold (countdown + bolt) */
+    --avatar: #9d7bff;              /* the little rider dot */
+
+    /* -- Wait-time heat scale (queue length): short -> long -------------- */
+    --wait1: #3fae5a;   /* <= 15 min */
+    --wait2: #86b300;   /* <= 30 min */
+    --wait3: #e0a020;   /* <= 45 min */
+    --wait4: #e0651f;   /* <= 75 min */
+    --wait5: #d23b3b;   /*  > 75 min */
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
