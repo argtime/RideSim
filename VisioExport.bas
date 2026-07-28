@@ -568,23 +568,35 @@ End Function
 ' so the backdrop always matches the exported data (same doc, same page size).
 ' No-op when there's no background page. Returns the path written, else "".
 Private Function ExportBackgroundSvg(pg As Visio.Page) As String
+    Dim win As Visio.Window, prevPage As Visio.Page
     On Error GoTo fail
     Dim bgPage As Visio.Page: Set bgPage = BackgroundPageOf(pg)
     If bgPage Is Nothing Then Exit Function
     Dim f As String: f = ParkFolder()
     If f = "" Then Exit Function
-    ' warn if the pages differ in size — the backdrop would be stretched to fit
-    Dim cw As Double, ch As Double, bw As Double, bh As Double
-    cw = pg.PageSheet.CellsU("PageWidth").ResultIU: ch = pg.PageSheet.CellsU("PageHeight").ResultIU
-    bw = bgPage.PageSheet.CellsU("PageWidth").ResultIU: bh = bgPage.PageSheet.CellsU("PageHeight").ResultIU
-    If Abs(cw - bw) > 0.01 Or Abs(ch - bh) > 0.01 Then _
-        Warn "Background page '" & bgPage.Name & "' (" & Format$(bw, "0.##") & "x" & Format$(bh, "0.##") & _
-             " in) differs from the content page (" & Format$(cw, "0.##") & "x" & Format$(ch, "0.##") & " in); backdrop will be stretched."
+    ' warn only when the pages differ at 2 decimal places (ignore fp/precision noise)
+    Dim cw As String, ch As String, bw As String, bh As String
+    cw = Format$(pg.PageSheet.CellsU("PageWidth").ResultIU, "0.00")
+    ch = Format$(pg.PageSheet.CellsU("PageHeight").ResultIU, "0.00")
+    bw = Format$(bgPage.PageSheet.CellsU("PageWidth").ResultIU, "0.00")
+    bh = Format$(bgPage.PageSheet.CellsU("PageHeight").ResultIU, "0.00")
+    If cw <> bw Or ch <> bh Then _
+        Warn "Background page '" & bgPage.Name & "' (" & bw & "x" & bh & " in) differs from the content page (" & cw & "x" & ch & " in); backdrop will be stretched."
     Dim svgPath As String: svgPath = f & "background.svg"
+    ' Page.Export follows the active window, so make the background page current for
+    ' the export (otherwise it exports the foreground), then restore the view.
+    Set win = Visio.ActiveWindow
+    If Not win Is Nothing Then
+        Set prevPage = win.Page
+        win.Page = bgPage.Name
+    End If
     bgPage.Export svgPath
+    If Not prevPage Is Nothing Then win.Page = prevPage.Name
     ExportBackgroundSvg = svgPath
     Exit Function
 fail:
+    On Error Resume Next
+    If Not prevPage Is Nothing Then win.Page = prevPage.Name
     Warn "Could not export background page to SVG: " & Err.Description
 End Function
 
