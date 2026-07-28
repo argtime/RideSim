@@ -452,7 +452,7 @@ Public Sub ExportRideSim()
         Dim queJson As String: queJson = ""
         If KeyExists(queueOf, "k" & shp.id) Then queJson = queueOf("k" & shp.id)
         If attrCount > 0 Then attrJson = attrJson & "," & vbCrLf
-        attrJson = attrJson & AttractionJson(aId, ShapeName(shp), entId, exId, ac(0), ac(1), RideDur(shp), CategoryOf(shp), IsClosed(shp), WaitIdOf(shp), accJson, PropStr(shp, "Hovertext"), AvgWaitOf(shp), trkJson, queJson, ThpwIdOf(shp), PropStr(shp, "Audio"), PropIsTrue(shp, Array("QInside", "QueueInside")), PropTri(shp, Array("RInside", "RideInside", "Indoor")), PropSunFrac(shp, Array("QSun", "QueueSun")))
+        attrJson = attrJson & AttractionJson(aId, ShapeName(shp), entId, exId, ac(0), ac(1), RideDur(shp), CategoryOf(shp), IsClosed(shp), WaitIdOf(shp), accJson, PropStr(shp, "Hovertext"), AvgWaitOf(shp), trkJson, queJson, LabelPosJson(shp), ThpwIdOf(shp), PropStr(shp, "Audio"), PropIsTrue(shp, Array("QInside", "QueueInside")), PropTri(shp, Array("RInside", "RideInside", "Indoor")), PropSunFrac(shp, Array("QSun", "QueueSun")))
         attrCount = attrCount + 1
     Next
 
@@ -672,6 +672,25 @@ Private Function LocalToPagePx(shp As Visio.Shape, xl As Double, yl As Double) A
     Dim xp As Double, yp As Double
     xp = pinx + xr: yp = piny + yr
     LocalToPagePx = Array(Round(xp * PPI), Round((mPageH - yp) * PPI))
+End Function
+
+' Optional label position (node px) = the shape's FIRST control point, used by the
+' web app to place the CENTER of the attraction's name label. Skipped when there
+' is no control point, or its Y Behavior (Controls col 5) is Hidden (value 6) — so
+' you can leave the handle in the master but turn it off per instance.
+Private Function LabelPosJson(shp As Visio.Shape) As String
+    On Error GoTo none
+    If Not shp.SectionExists(visSectionControls, visExistsAnywhere) Then GoTo none
+    If shp.RowCount(visSectionControls) < 1 Then GoTo none
+    If shp.CellsSRC(visSectionControls, 0, 5).Result(visNone) = 6 Then GoTo none   ' Y Behavior = Hidden
+    Dim clx As Double, cly As Double
+    clx = shp.CellsSRC(visSectionControls, 0, 0).ResultIU   ' Controls.X (local inches)
+    cly = shp.CellsSRC(visSectionControls, 0, 1).ResultIU   ' Controls.Y (local inches)
+    Dim lp As Variant: lp = LocalToPagePx(shp, clx, cly)
+    LabelPosJson = "{ ""x"": " & CLng(lp(0)) & ", ""y"": " & CLng(lp(1)) & " }"
+    Exit Function
+none:
+    LabelPosJson = ""
 End Function
 
 ' Bounding box (in node px) of the shape(s) on the BG_LAYER layer = where the
@@ -1509,7 +1528,7 @@ Private Function AttractionJson(id As String, nm As String, entId As String, exI
                           x As Variant, y As Variant, ride As Double, cat As String, _
                           closed As Boolean, waitId As String, accessIds As String, _
                           hover As String, avgWait As Double, trackJson As String, queueJson As String, _
-                          thpw As String, audio As String, qInside As Boolean, rInsideTri As Long, _
+                          labelPosJson As String, thpw As String, audio As String, qInside As Boolean, rInsideTri As Long, _
                           qSun As Double) As String
     ' Emit each optional field only when set; otherwise lines match the original
     ' shape so the web app (ride/open defaults) is happy.
@@ -1531,6 +1550,8 @@ Private Function AttractionJson(id As String, nm As String, entId As String, exI
     If trackJson <> "" Then trkJson = ", ""track"": " & trackJson
     Dim queJson As String
     If queueJson <> "" Then queJson = ", ""queue"": " & queueJson
+    Dim lblJson As String
+    If labelPosJson <> "" Then lblJson = ", ""labelPos"": " & labelPosJson
     Dim audioJson As String
     If Trim$(audio) <> "" Then audioJson = ", ""audio"": """ & JStr(Trim$(audio)) & """"
     Dim insideJson As String       ' indoor flags for the sun/AC bar (only when set)
@@ -1544,7 +1565,7 @@ Private Function AttractionJson(id As String, nm As String, entId As String, exI
     AttractionJson = "  { ""id"": """ & id & """, ""name"": """ & JStr(nm) & _
         """, ""entranceNodeId"": """ & entId & """, ""exitNodeId"": """ & exId & _
         """, ""displayLocation"": { ""x"": " & CLng(x) & ", ""y"": " & CLng(y) & _
-        " }, ""rideDuration"": " & CLng(Round(ride)) & catJson & closedJson & waitJson & thpwJson & accJson & hoverJson & avgJson & trkJson & queJson & audioJson & insideJson & " }"
+        " }, ""rideDuration"": " & CLng(Round(ride)) & catJson & closedJson & waitJson & thpwJson & accJson & hoverJson & avgJson & trkJson & queJson & lblJson & audioJson & insideJson & " }"
 End Function
 
 ' ThemeParks.wiki entity GUID from Shape Data (Prop.ThPWID and aliases), used

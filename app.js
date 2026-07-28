@@ -1300,11 +1300,22 @@ function resizeCanvas() {
   draw();
 }
 
-// Once zoomed past LABEL_ZOOM, draw each visible attraction's name centred below
-// its circle (fading in over a short range so it doesn't pop). Skips minor POIs
-// (pins/other/restrooms) and off-screen circles; while animating, only plan stops
-// are shown — matching which circles draw(). Rendered after the circles so names
-// sit on top. Font grows sub-linearly (sqrt) so text stays legible, not huge.
+// A leader from the node (x1,y1) to the label (x2,y2): dark halo + light core,
+// with a small pin dot at the node end. fs scales the widths.
+function drawLeaderStem(x1, y1, x2, y2, fs) {
+  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+  ctx.strokeStyle = "rgba(8,15,25,0.85)"; ctx.lineWidth = Math.max(2, fs * 0.14); ctx.stroke();
+  ctx.strokeStyle = "rgba(234,242,255,0.95)"; ctx.lineWidth = Math.max(1, fs * 0.07); ctx.stroke();
+  const dotR = Math.max(1.8, fs * 0.13);
+  ctx.beginPath(); ctx.arc(x1, y1, dotR, 0, 7);
+  ctx.lineWidth = Math.max(1, fs * 0.07); ctx.strokeStyle = "rgba(8,15,25,0.85)";
+  ctx.fillStyle = "rgba(234,242,255,0.95)"; ctx.fill(); ctx.stroke();
+}
+// Once zoomed past LABEL_ZOOM, draw each visible attraction's name (fading in over
+// a short range so it doesn't pop). Default position is centred below the circle;
+// a shape's control point (a.labelPos) overrides that, centring the label there
+// with the leader pointing at it. Skips pins/restrooms and off-screen circles;
+// while animating, only plan stops show. Font grows sub-linearly (sqrt).
 function drawZoomedNames() {
   if (userZoom < LABEL_ZOOM) return;
   const alpha = Math.max(0, Math.min(1, (userZoom - LABEL_ZOOM) / 0.6));
@@ -1318,28 +1329,32 @@ function drawZoomedNames() {
     const inSeq = seqIndexOf(a.id), cat = attrCat(a);
     if (!catFilter[cat] && inSeq < 0) return;      // filtered out
     if (playing && inSeq < 0) return;              // while animating, only plan stops
-    if (cat === "pin" || cat === "other" || cat === "restroom") return;  // minor POIs: no name
+    if (cat === "pin" || cat === "restroom") return;   // pins & restrooms: no name label
     const loc = a.displayLocation || state.nodes.get(a.entranceNodeId);
     if (!loc) return;
     const X = tx(loc.x), Y = ty(loc.y);
     if (X < -60 || X > w + 60 || Y < -20 || Y > h + 40) return;   // only what's on screen
-    const rEdge = Y + sz.r;                          // bottom of the circle
-    const labelY = rEdge + Math.max(7, fs * 0.7);    // gap leaves room for the leader stem
     const name = a.name || a.id;
     ctx.globalAlpha = alpha;
-    // leader stem from the circle down to the label (dark halo + light core, like the text)
-    ctx.beginPath(); ctx.moveTo(X, rEdge); ctx.lineTo(X, labelY - Math.max(2, fs * 0.12));
-    ctx.strokeStyle = "rgba(8,15,25,0.85)"; ctx.lineWidth = Math.max(2, fs * 0.14); ctx.stroke();
-    ctx.strokeStyle = "rgba(234,242,255,0.95)"; ctx.lineWidth = Math.max(1, fs * 0.07); ctx.stroke();
-    // pin dot where the leader meets the node
-    const dotR = Math.max(1.8, fs * 0.13);
-    ctx.beginPath(); ctx.arc(X, rEdge, dotR, 0, 7);
-    ctx.lineWidth = Math.max(1, fs * 0.07); ctx.strokeStyle = "rgba(8,15,25,0.85)";
-    ctx.fillStyle = "rgba(234,242,255,0.95)"; ctx.fill(); ctx.stroke();
-    // name
-    ctx.lineWidth = Math.max(1.5, fs * 0.14);
-    ctx.strokeStyle = "rgba(8,15,25,0.9)"; ctx.strokeText(name, X, labelY);   // dark halo for legibility
-    ctx.fillStyle = "#eaf2ff"; ctx.fillText(name, X, labelY);
+    if (a.labelPos) {
+      // custom placement: centre the label on the shape's control point; leader points to it
+      const Lx = tx(a.labelPos.x), Ly = ty(a.labelPos.y);
+      const dx = Lx - X, dy = Ly - Y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+      const endDist = Math.max(sz.r + fs * 0.25, d - fs * 0.85);   // stop the stem short of the text
+      drawLeaderStem(X + ux * sz.r, Y + uy * sz.r, X + ux * endDist, Y + uy * endDist, fs);
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = Math.max(1.5, fs * 0.14);
+      ctx.strokeStyle = "rgba(8,15,25,0.9)"; ctx.strokeText(name, Lx, Ly);
+      ctx.fillStyle = "#eaf2ff"; ctx.fillText(name, Lx, Ly);
+      ctx.textBaseline = "top";
+    } else {
+      // default: name centred below the circle with a short vertical stem
+      const rEdge = Y + sz.r, labelY = rEdge + Math.max(7, fs * 0.7);
+      drawLeaderStem(X, rEdge, X, labelY - Math.max(2, fs * 0.12), fs);
+      ctx.lineWidth = Math.max(1.5, fs * 0.14);
+      ctx.strokeStyle = "rgba(8,15,25,0.9)"; ctx.strokeText(name, X, labelY);
+      ctx.fillStyle = "#eaf2ff"; ctx.fillText(name, X, labelY);
+    }
     ctx.globalAlpha = 1;
   });
 }
