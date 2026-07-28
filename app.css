@@ -44,6 +44,12 @@
     --wait3: #e0a020;   /* <= 45 min */
     --wait4: #e0651f;   /* <= 75 min */
     --wait5: #d23b3b;   /*  > 75 min */
+
+    /* -- Sky ring on the "feels like" pill ------------------------------- */
+    --sky-night: #000000;    /* night */
+    --sky-cloudy: #616874;   /* mostly cloudy */
+    --sky-partly: #aab3c2;   /* partly cloudy */
+    --sky-clear: #4aa6e8;    /* mostly clear */
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }

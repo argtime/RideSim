@@ -62,6 +62,8 @@ const ATTR_COLORS = {
   restroom:   { off: cssVar("--icon-restroom-off"),   on: cssVar("--icon-restroom-on") },
   other:      { off: cssVar("--icon-other-off"),      on: cssVar("--icon-other-on") }
 };
+// Sky-condition ring colors for the "feels like" pill.
+const SKY = { night: cssVar("--sky-night"), cloudy: cssVar("--sky-cloudy"), partly: cssVar("--sky-partly"), clear: cssVar("--sky-clear") };
 // Per-category labels/markers used by the timeline, itinerary and animation.
 const CAT_META = {
   ride:       { verb: "Ride ",    short: "Ride", phase: "RIDE", cls: "ride", anim: "🎢 Riding ",      barVar: "var(--ride)", color: cssVar("--ride"), wait: true },
@@ -605,13 +607,23 @@ function renderUvBadge() {
   }
 }
 let weatherTimer = null;
+// Sky-condition ring for the "feels like" pill: night is black; by day the ring
+// goes blue (mostly clear) -> light gray (partly) -> dark gray (mostly cloudy).
+function skyInfo(c) {
+  if (c.is_day === 0) return { color: SKY.night, label: "Night" };
+  const cc = c.cloud_cover;
+  if (typeof cc !== "number") return null;                     // unknown: keep the default border
+  if (cc >= 70) return { color: SKY.cloudy, label: "Mostly cloudy · " + Math.round(cc) + "% cloud" };
+  if (cc >= 30) return { color: SKY.partly, label: "Partly cloudy · " + Math.round(cc) + "% cloud" };
+  return { color: SKY.clear, label: "Mostly clear · " + Math.round(cc) + "% cloud" };
+}
 function fetchWeather() {
   const el = document.getElementById("feelsTemp"); if (!el) return;
   const ll = parkCentroidLatLon();
   if (!ll) { el.style.display = "none"; return; }   // uncalibrated park: no location, no temp
   const url = "https://api.open-meteo.com/v1/forecast?latitude=" + ll.lat.toFixed(4) +
     "&longitude=" + ll.lon.toFixed(4) + "&timezone=auto&temperature_unit=fahrenheit" +
-    "&current=apparent_temperature,temperature_2m,relative_humidity_2m,wet_bulb_temperature_2m,uv_index,weather_code" +
+    "&current=apparent_temperature,temperature_2m,relative_humidity_2m,wet_bulb_temperature_2m,uv_index,weather_code,cloud_cover,is_day" +
     "&minutely_15=precipitation,precipitation_probability&forecast_minutely_15=12" +
     "&hourly=weather_code,precipitation_probability&forecast_hours=6";
   fetch(url, { cache: "no-store" }).then(r => r.json()).then(d => {
@@ -630,6 +642,9 @@ function fetchWeather() {
       el.style.display = "flex";
       el.innerHTML = (showWB ? wbIcon(wb) : "") +
         '<div class="ft-text"><span class="lbl">feels like</span><span class="tm">' + Math.round(feels) + '°</span></div>';
+      const sky = skyInfo(c);   // colour the border to hint the sky (night / cloud cover)
+      if (sky) { el.style.borderWidth = "2px"; el.style.borderColor = sky.color; el.title = sky.label; }
+      else { el.style.borderWidth = ""; el.style.borderColor = ""; el.title = ""; }
     } else el.style.display = "none";
   }).catch(() => { el.style.display = "none"; });
 }
