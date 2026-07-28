@@ -1140,10 +1140,11 @@ function resetView() { userZoom = 1; panX = 0; panY = 0; clampPan(); applyView()
 // attraction markers look oversized and overlap. Shrink them on the same
 // breakpoint the layout uses (re-evaluated each draw, so rotate/resize updates).
 const mobileMQ = window.matchMedia("(max-width: 820px)");
-// How much fixed-pixel map overlays (icons, ride-spin radii, the avatar) grow
-// with zoom. userZoom keeps them a constant size *relative to the map* — so at
-// fit they're the tuned base size, and zooming in enlarges them with the map.
-function uiZoom() { return userZoom; }
+// Scale factor for fixed-pixel map overlays (icons, ride-spin radii, the avatar)
+// as you zoom. 1 = constant on-screen size at every zoom level (markers stay put
+// like a map app's pins). Return userZoom to grow them with the map, or
+// Math.sqrt(userZoom) for a gentle in-between.
+function uiZoom() { return 1; }
 function attrSize() {
   const z = uiZoom();
   return mobileMQ.matches
