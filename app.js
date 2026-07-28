@@ -2750,6 +2750,9 @@ function persistentScaleBefore(stepIndex) {
   for (let i = 0; i < stepIndex && i < state.steps.length; i++) p *= avatarFactor(state.steps[i].category);
   return p;
 }
+// A ride shrinks the avatar to half size — held through the queue *and* the ride
+// so it stays one consistent size. Transient: it doesn't compound into pBase.
+const RIDE_AVATAR_SHRINK = 0.5;
 
 // Chase-cam: pan so the avatar sits at the viewport center. Smoothed (lerp) so a
 // ride's spin/orbit doesn't swirl the map; snaps instantly on the first frame of
@@ -2794,7 +2797,9 @@ function renderAnimAt(clock) {
         const p = pointAlong([{ x: ent.x, y: ent.y }, ...a.queue], frac);
         mx = p.x; my = p.y;
       }
-      marker = { x: mx, y: my, stroke: "#ff8a5c", scale: persistentScaleBefore(i) };
+      // rides hold the half-size avatar through the queue too (matches the ride)
+      const wScale = persistentScaleBefore(i) * (s.category === "ride" ? RIDE_AVATAR_SHRINK : 1);
+      marker = { x: mx, y: my, stroke: "#ff8a5c", scale: wScale };
       info = "Waiting for " + s.name + " — " + Math.round(absT - s.waitStart) + "/" + Math.round(s.wait) + " min";
       break;
     } else if (absT < s.rideEnd) {
@@ -2813,7 +2818,7 @@ function renderAnimAt(clock) {
         const g = s.ride > 0 ? Math.max(0, Math.min(1, (absT - s.rideStart) / s.ride)) : 1;
         rideScale = pBase * (1 + (avatarFactor(s.category) - 1) * g);
       } else if (s.category === "ride") {
-        rideScale = pBase * 0.5;
+        rideScale = pBase * RIDE_AVATAR_SHRINK;
       } else {
         rideScale = pBase;  // shops/pins: no size change
       }
