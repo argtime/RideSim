@@ -2442,15 +2442,19 @@ function hourLabel(h) { const ap = h < 12 ? "a" : "p"; let hh = h % 12; if (hh =
 // real clock time (blank before/after the plan), sun = yellow, AC = blue.
 function renderSunFooter() {
   const el = document.getElementById("sunFooter"); if (!el) return;
-  const DAY = 1440;
-  let ticks = "", labels = "";
-  for (let h = 0; h <= 24; h += 3) {
-    const left = (h / 24) * 100;
-    ticks += '<div class="sf-tick" style="left:' + left + '%"></div>';
-    if (h < 24) labels += '<div class="sf-lbl" style="left:' + left + '%">' + hourLabel(h) + '</div>';
-  }
-  let segHtml = "", legend = "";
+  let ticks = "", labels = "", segHtml = "", legend = "";
   if (state.steps.length) {
+    // the bar spans just the plan (first walk -> last ride end), so it fills the
+    // width and scrubbing is fine-grained. Everything positions by (min-start)/span.
+    const planStart = state.steps[0].walkStart, span = Math.max(1, simSpanMin()), planEnd = planStart + span;
+    const pos = (m) => ((m - planStart) / span) * 100;
+    // hour gridlines across the span; thin the labels on long days
+    const startH = Math.ceil(planStart / 60), lblEvery = span > 600 ? 3 : span > 300 ? 2 : 1;
+    for (let hh = startH; hh <= Math.floor(planEnd / 60); hh++) {
+      const left = pos(hh * 60).toFixed(3);
+      ticks += '<div class="sf-tick" style="left:' + left + '%"></div>';
+      if ((hh - startH) % lblEvery === 0) labels += '<div class="sf-lbl" style="left:' + left + '%">' + hourLabel(hh % 24) + '</div>';
+    }
     const blocks = [];
     // kind: "sun" (outdoor/hot), "shade" (shaded queue — cool but not AC), "ac" (indoor)
     const add = (a, b, kind, label, step) => { if (b > a) blocks.push({ a: a, b: b, kind: kind, label: label, step: step }); };
@@ -2466,16 +2470,12 @@ function renderSunFooter() {
     });
     const KIND = { sun: { c: "#ffcc4d", tip: "Hot" }, shade: { c: "#a9def0", tip: "Shade" }, ac: { c: "var(--accent)", tip: "AC" } };
     segHtml = blocks.map((b, i) => {
-      const startMin = ((b.a % DAY) + DAY) % DAY, dur = b.b - b.a;
       const k = KIND[b.kind];
       const tip = k.tip + " · " + b.label + " · " + minToHM(b.a) + "–" + minToHM(b.b);
       // 1px black divider between contiguous same-color blocks (none across a color change)
       const div = (i > 0 && blocks[i - 1].kind === b.kind) ? ";border-left:1px solid #000" : "";
-      const seg = (leftMin, min, d) => '<div class="sf-seg" data-step="' + b.step + '" style="left:' + (leftMin / DAY * 100).toFixed(3) +
-        '%;width:' + Math.max(min / DAY * 100, 0.06).toFixed(3) + '%;background:' + k.c + d + '" title="' + esc(tip) + '"></div>';
-      // a block that crosses midnight wraps: tail at the right edge, rest from 12a
-      if (startMin + dur > DAY) return seg(startMin, DAY - startMin, div) + seg(0, startMin + dur - DAY, "");
-      return seg(startMin, dur, div);
+      return '<div class="sf-seg" data-step="' + b.step + '" style="left:' + pos(b.a).toFixed(3) +
+        '%;width:' + Math.max((b.b - b.a) / span * 100, 0.06).toFixed(3) + '%;background:' + k.c + div + '" title="' + esc(tip) + '"></div>';
     }).join("");
     const d = sunSegments();
     legend = '<span style="color:#ffcc4d">☀️ ' + fmtDur(d.sun) + '</span><span style="color:var(--accent)">❄️ ' + fmtDur(d.ac) + '</span>';
@@ -2483,7 +2483,6 @@ function renderSunFooter() {
   el.innerHTML = '<div class="sf-track">' + ticks + segHtml + '<div class="sf-now" id="sfNow"></div></div>' +
     '<div class="sf-axis">' + labels + (legend ? '<div class="sf-legend">' + legend + '</div>' : "") +
     '<div class="sf-now-lbl" id="sfNowLbl"></div></div>';
-  el.querySelectorAll(".sf-seg").forEach(seg => { seg.onclick = () => selectStep(+seg.dataset.step); });
   // a rebuild mid-animation (e.g. a plan edit while paused) would drop the cursor
   if (state.steps.length && (playing || animClock > 0)) updateSunNow(state.steps[0].walkStart + animClock);
 }
@@ -2497,8 +2496,9 @@ function sunNowLabel(min) {
 }
 function updateSunNow(absT) {
   const line = document.getElementById("sfNow"), lbl = document.getElementById("sfNowLbl");
-  if (!line || !lbl) return;
-  const left = ((((absT % 1440) + 1440) % 1440) / 1440 * 100).toFixed(3) + "%";
+  if (!line || !lbl || !state.steps.length) return;
+  const planStart = state.steps[0].walkStart, span = Math.max(1, simSpanMin());
+  const left = (Math.max(0, Math.min(1, (absT - planStart) / span)) * 100).toFixed(3) + "%";
   line.style.left = left; line.style.display = "block";
   lbl.style.left = left; lbl.style.display = "block";
   const t = sunNowLabel(absT);
@@ -3451,7 +3451,7 @@ document.addEventListener("keydown", (e) => {
 // The bar is linear in clock time and the plan is a contiguous slice of it, so a
 // drag maps 1:1 to the sim clock (clamped to the plan). A plain click still
 // selects a step; only a drag scrubs. Scrubbing pauses playback; Play resumes.
-let sunScrub = null, sunScrubSuppressClick = false;
+let sunScrub = null;
 function sunFrac(clientX) {
   const track = document.querySelector("#sunFooter .sf-track");
   if (!track) return null;
@@ -3461,11 +3461,19 @@ function sunFrac(clientX) {
 function sunScrubTo(clientX) {
   if (!state.steps.length) return;
   const f = sunFrac(clientX); if (f == null) return;
-  const base = state.steps[0].walkStart;
-  animClock = Math.max(0, Math.min(simSpanMin(), f * 1440 - base));
-  camSnap = true;                         // keep the avatar centred while scrubbing (when zoomed)
+  const span = simSpanMin();
+  animClock = Math.max(0, Math.min(span, f * span));   // bar spans the plan, so f maps straight to the clock
+  camSnap = true;                                       // keep the avatar centred while scrubbing (when zoomed)
   renderAnimAt(animClock);
-  updateSunNow(base + animClock);
+  updateSunNow(state.steps[0].walkStart + animClock);
+}
+// A plain tap jumps the animation there and highlights the leg it lands in.
+function sunTap(clientX) {
+  if (playing) pause();
+  sunScrubbing = true;
+  sunScrubTo(clientX);
+  if (activeStepIndex >= 0) { selectedStep = activeStepIndex; applySelectionUI(); }
+  sunScrubbing = false;
 }
 (function wireSunScrub() {
   const el = document.getElementById("sunFooter"); if (!el) return;
@@ -3475,7 +3483,7 @@ function sunScrubTo(clientX) {
     if (!sunScrub.moved && Math.abs(e.clientX - sunScrub.x) > 4) { sunScrub.moved = true; sunScrubbing = true; if (playing) pause(); }
     if (sunScrub.moved) sunScrubTo(e.clientX);
   });
-  window.addEventListener("mouseup", () => { if (sunScrub && sunScrub.moved) sunScrubSuppressClick = true; sunScrub = null; sunScrubbing = false; });
+  window.addEventListener("mouseup", () => { if (sunScrub && !sunScrub.moved) sunTap(sunScrub.x); sunScrub = null; sunScrubbing = false; });
   el.addEventListener("touchstart", (e) => { if (state.steps.length) sunScrub = { x: e.touches[0].clientX, moved: false }; }, { passive: true });
   el.addEventListener("touchmove", (e) => {
     if (!sunScrub) return;
@@ -3483,9 +3491,7 @@ function sunScrubTo(clientX) {
     if (!sunScrub.moved && Math.abs(cx - sunScrub.x) > 6) { sunScrub.moved = true; sunScrubbing = true; if (playing) pause(); }
     if (sunScrub.moved) { e.preventDefault(); sunScrubTo(cx); }
   }, { passive: false });
-  el.addEventListener("touchend", () => { if (sunScrub && sunScrub.moved) sunScrubSuppressClick = true; sunScrub = null; sunScrubbing = false; }, { passive: true });
-  // swallow the click that ends a scrub drag so it doesn't also select a step
-  el.addEventListener("click", (e) => { if (sunScrubSuppressClick) { sunScrubSuppressClick = false; e.stopPropagation(); e.preventDefault(); } }, true);
+  el.addEventListener("touchend", () => { if (sunScrub && !sunScrub.moved) sunTap(sunScrub.x); sunScrub = null; sunScrubbing = false; }, { passive: true });
 })();
 function setStartNow() {
   const d = new Date();
