@@ -117,6 +117,8 @@ Attribute VB_Name = "VisioExport"
 '   same. On export the background page is written to parks\<page-slug>\
 '   background.svg automatically and SAMPLE.mapExtent becomes the whole page, so
 '   the backdrop and the nodes always share one coordinate space (can't drift).
+'   Run the macro from EITHER page: from the data page it exports its background;
+'   from the map (background) page it exports that map and hops to the data page.
 '   Legacy: put a map image on a layer named "Bck" and draw nodes over it; the
 '   exporter writes that shape's bounding box as SAMPLE.mapExtent and you supply
 '   background.png/.svg yourself. A "Bck" shape, if present, wins over the page.
@@ -166,6 +168,7 @@ Private mRole As Collection                ' "k"&Shape.ID -> role (node-like sha
 Private mScaleIds As Collection            ' "k"&Shape.ID of ScaleStart/ScaleEnd shapes
 Private mTrackIds As Collection            ' "k"&Shape.ID of Track-layer shapes
 Private mQueueIds As Collection            ' "k"&Shape.ID of Queue-layer shapes
+Private mDataPage As Visio.Page            ' resolved data (foreground) page for this export
 Private mWarnings As Collection
 
 '------------------------------------------------------------------------------
@@ -173,6 +176,20 @@ Public Sub ExportRideSim()
     Dim pg As Visio.Page
     Set pg = Visio.ActivePage
     If pg Is Nothing Then MsgBox "No active page.", vbExclamation: Exit Sub
+
+    ' Run from either page. If the active page is a background page it's the map —
+    ' hop to the data page that uses it. Otherwise the active page is the data page
+    ' and its assigned background (if any) is the map.
+    Dim mapPage As Visio.Page
+    If pg.Background <> 0 Then
+        Set mapPage = pg
+        Set pg = ForegroundUsing(pg)
+        If pg Is Nothing Then MsgBox "This background (map) page isn't assigned to any data page." & vbCrLf & _
+            "Open the data page, or set this page as its background, then re-run.", vbExclamation, "RideSim Export": Exit Sub
+    Else
+        Set mapPage = BackgroundPageOf(pg)
+    End If
+    Set mDataPage = pg
 
     mPageH = pg.PageSheet.CellsU("PageHeight").ResultIU
     Set mNodeMap = New Collection
@@ -513,7 +530,7 @@ Public Sub ExportRideSim()
               savedTo & vbCrLf & "Paste the blocks in manually."
     End If
 
-    Dim svgOut As String: svgOut = ExportBackgroundSvg(pg)
+    Dim svgOut As String: svgOut = ExportBackgroundSvg(mapPage, pg)
     If svgOut <> "" Then msg = msg & vbCrLf & vbCrLf & "Background page exported to:" & vbCrLf & svgOut
 
     If mWarnings.Count > 0 Then
@@ -547,7 +564,8 @@ Private Function ParkFolder() As String
     On Error GoTo 0
     If folder = "" Then Exit Function
     If Right$(folder, 1) <> "\" Then folder = folder & "\"
-    Dim slug As String: slug = Slugify(Visio.ActivePage.Name)
+    Dim slug As String
+    If Not mDataPage Is Nothing Then slug = Slugify(mDataPage.Name) Else slug = Slugify(Visio.ActivePage.Name)
     If slug = "" Then Exit Function
     ParkFolder = folder & "parks\" & slug & "\"
 End Function
@@ -564,39 +582,47 @@ Private Function BackgroundPageOf(pg As Visio.Page) As Visio.Page
     End If
 done:
 End Function
-' Export the active page's background page to background.svg in the park folder,
-' so the backdrop always matches the exported data (same doc, same page size).
-' No-op when there's no background page. Returns the path written, else "".
-Private Function ExportBackgroundSvg(pg As Visio.Page) As String
-    Dim win As Visio.Window, prevPage As Visio.Page
+' The (foreground) page that uses bgPage as its background, or Nothing.
+Private Function ForegroundUsing(bgPage As Visio.Page) As Visio.Page
+    Dim p As Visio.Page, b As Visio.Page
+    For Each p In ThisDocument.Pages
+        If p.Background = 0 Then
+            Set b = BackgroundPageOf(p)
+            If Not b Is Nothing Then
+                If b.ID = bgPage.ID Then Set ForegroundUsing = p: Exit Function
+            End If
+        End If
+    Next p
+End Function
+' Export the map (background) page to background.svg in the park folder, so the
+' backdrop always matches the exported data. Warns if the two pages differ in size
+' (to 2 dp). Leaves the view on the data page. No-op if mapPage is Nothing.
+Private Function ExportBackgroundSvg(mapPage As Visio.Page, dataPage As Visio.Page) As String
+    Dim win As Visio.Window
     On Error GoTo fail
-    Dim bgPage As Visio.Page: Set bgPage = BackgroundPageOf(pg)
-    If bgPage Is Nothing Then Exit Function
+    If mapPage Is Nothing Then Exit Function
     Dim f As String: f = ParkFolder()
     If f = "" Then Exit Function
     ' warn only when the pages differ at 2 decimal places (ignore fp/precision noise)
     Dim cw As String, ch As String, bw As String, bh As String
-    cw = Format$(pg.PageSheet.CellsU("PageWidth").ResultIU, "0.00")
-    ch = Format$(pg.PageSheet.CellsU("PageHeight").ResultIU, "0.00")
-    bw = Format$(bgPage.PageSheet.CellsU("PageWidth").ResultIU, "0.00")
-    bh = Format$(bgPage.PageSheet.CellsU("PageHeight").ResultIU, "0.00")
+    cw = Format$(dataPage.PageSheet.CellsU("PageWidth").ResultIU, "0.00")
+    ch = Format$(dataPage.PageSheet.CellsU("PageHeight").ResultIU, "0.00")
+    bw = Format$(mapPage.PageSheet.CellsU("PageWidth").ResultIU, "0.00")
+    bh = Format$(mapPage.PageSheet.CellsU("PageHeight").ResultIU, "0.00")
     If cw <> bw Or ch <> bh Then _
-        Warn "Background page '" & bgPage.Name & "' (" & bw & "x" & bh & " in) differs from the content page (" & cw & "x" & ch & " in); backdrop will be stretched."
+        Warn "Background page '" & mapPage.Name & "' (" & bw & "x" & bh & " in) differs from the content page (" & cw & "x" & ch & " in); backdrop will be stretched."
     Dim svgPath As String: svgPath = f & "background.svg"
-    ' Page.Export follows the active window, so make the background page current for
-    ' the export (otherwise it exports the foreground), then restore the view.
+    ' Page.Export follows the active window: show the map to export it, then leave
+    ' the view on the data (foreground) page.
     Set win = Visio.ActiveWindow
-    If Not win Is Nothing Then
-        Set prevPage = win.Page
-        win.Page = bgPage.Name
-    End If
-    bgPage.Export svgPath
-    If Not prevPage Is Nothing Then win.Page = prevPage.Name
+    If Not win Is Nothing Then win.Page = mapPage.Name
+    mapPage.Export svgPath
+    If Not win Is Nothing Then win.Page = dataPage.Name
     ExportBackgroundSvg = svgPath
     Exit Function
 fail:
     On Error Resume Next
-    If Not prevPage Is Nothing Then win.Page = prevPage.Name
+    If Not win Is Nothing Then win.Page = dataPage.Name
     Warn "Could not export background page to SVG: " & Err.Description
 End Function
 
