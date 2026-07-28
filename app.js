@@ -1141,10 +1141,9 @@ function resetView() { userZoom = 1; panX = 0; panY = 0; clampPan(); applyView()
 // breakpoint the layout uses (re-evaluated each draw, so rotate/resize updates).
 const mobileMQ = window.matchMedia("(max-width: 820px)");
 // Scale factor for fixed-pixel map overlays (icons, ride-spin radii, the avatar)
-// as you zoom. 1 = constant on-screen size at every zoom level (markers stay put
-// like a map app's pins). Return userZoom to grow them with the map, or
-// Math.sqrt(userZoom) for a gentle in-between.
-function uiZoom() { return 1; }
+// as you zoom. sqrt(userZoom) grows them with zoom but gently — ~2.4x at 6x zoom
+// rather than 6x. Dial: 1 = constant on-screen size; userZoom = grow with the map.
+function uiZoom() { return Math.sqrt(userZoom); }
 function attrSize() {
   const z = uiZoom();
   return mobileMQ.matches
