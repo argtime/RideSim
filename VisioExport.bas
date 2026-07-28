@@ -112,12 +112,14 @@ Attribute VB_Name = "VisioExport"
 '   instead sit on ScaleStart/ScaleEnd if you prefer.)
 '
 ' BACKGROUND MAP
-'   Put your map image on a layer named "Bck" (Home > Layers) and draw the nodes
-'   over it. The exporter writes that shape's bounding box as SAMPLE.mapExtent,
-'   and the planner stretches background.png to exactly that rectangle - so any
-'   image resolution lines up automatically (no manual aligning). Export the
-'   same image as background.png into the park folder, next to its park.js
-'   (parks\<page-slug>\background.png).
+'   Preferred: draw the map on its own page, set it as this page's BACKGROUND
+'   (Design > Backgrounds, or right-click the page tab), and size both pages the
+'   same. On export the background page is written to parks\<page-slug>\
+'   background.svg automatically and SAMPLE.mapExtent becomes the whole page, so
+'   the backdrop and the nodes always share one coordinate space (can't drift).
+'   Legacy: put a map image on a layer named "Bck" and draw nodes over it; the
+'   exporter writes that shape's bounding box as SAMPLE.mapExtent and you supply
+'   background.png/.svg yourself. A "Bck" shape, if present, wins over the page.
 '
 ' RIDE TRACKS (optional, for "interesting" rides):
 '   Draw the ride path as a line/freeform shape on a layer named "Track", and
@@ -511,6 +513,9 @@ Public Sub ExportRideSim()
               savedTo & vbCrLf & "Paste the blocks in manually."
     End If
 
+    Dim svgOut As String: svgOut = ExportBackgroundSvg(pg)
+    If svgOut <> "" Then msg = msg & vbCrLf & vbCrLf & "Background page exported to:" & vbCrLf & svgOut
+
     If mWarnings.Count > 0 Then
         Dim wv As Variant, wAll As String
         For Each wv In mWarnings: wAll = wAll & vbCrLf & " - " & wv: Next
@@ -525,6 +530,17 @@ End Sub
 ' <docfolder>\parks\<active-page-slug>\park.js (one folder per park).
 Private Function HtmlPath() As String
     If HTML_PATH_OVERRIDE <> "" Then HtmlPath = HTML_PATH_OVERRIDE: Exit Function
+    Dim f As String: f = ParkFolder()
+    If f <> "" Then HtmlPath = f & "park.js"
+End Function
+' <docfolder>\parks\<active-page-slug>\  — the folder holding this park's park.js
+' (and background.svg). "" if the doc is unsaved.
+Private Function ParkFolder() As String
+    If HTML_PATH_OVERRIDE <> "" Then
+        Dim k As Long: k = InStrRev(HTML_PATH_OVERRIDE, "\")
+        If k > 0 Then ParkFolder = Left$(HTML_PATH_OVERRIDE, k)
+        Exit Function
+    End If
     Dim folder As String
     On Error Resume Next
     folder = ThisDocument.path
@@ -533,7 +549,43 @@ Private Function HtmlPath() As String
     If Right$(folder, 1) <> "\" Then folder = folder & "\"
     Dim slug As String: slug = Slugify(Visio.ActivePage.Name)
     If slug = "" Then Exit Function
-    HtmlPath = folder & "parks\" & slug & "\park.js"
+    ParkFolder = folder & "parks\" & slug & "\"
+End Function
+' The background page assigned to a page (Page.BackPage), read defensively via
+' CallByName since it returns a name or a Page depending on the Visio version.
+' Nothing if the page has no background page (old image-in-a-BG_LAYER model).
+Private Function BackgroundPageOf(pg As Visio.Page) As Visio.Page
+    On Error GoTo done
+    Dim v As Variant: v = CallByName(pg, "BackPage", VbGet)
+    If IsObject(v) Then
+        Set BackgroundPageOf = v
+    ElseIf Len(Trim$(CStr(v))) > 0 Then
+        Set BackgroundPageOf = ThisDocument.Pages.Item(Trim$(CStr(v)))
+    End If
+done:
+End Function
+' Export the active page's background page to background.svg in the park folder,
+' so the backdrop always matches the exported data (same doc, same page size).
+' No-op when there's no background page. Returns the path written, else "".
+Private Function ExportBackgroundSvg(pg As Visio.Page) As String
+    On Error GoTo fail
+    Dim bgPage As Visio.Page: Set bgPage = BackgroundPageOf(pg)
+    If bgPage Is Nothing Then Exit Function
+    Dim f As String: f = ParkFolder()
+    If f = "" Then Exit Function
+    ' warn if the pages differ in size — the backdrop would be stretched to fit
+    Dim cw As Double, ch As Double, bw As Double, bh As Double
+    cw = pg.PageSheet.CellsU("PageWidth").ResultIU: ch = pg.PageSheet.CellsU("PageHeight").ResultIU
+    bw = bgPage.PageSheet.CellsU("PageWidth").ResultIU: bh = bgPage.PageSheet.CellsU("PageHeight").ResultIU
+    If Abs(cw - bw) > 0.01 Or Abs(ch - bh) > 0.01 Then _
+        Warn "Background page '" & bgPage.Name & "' (" & Format$(bw, "0.##") & "x" & Format$(bh, "0.##") & _
+             " in) differs from the content page (" & Format$(cw, "0.##") & "x" & Format$(ch, "0.##") & " in); backdrop will be stretched."
+    Dim svgPath As String: svgPath = f & "background.svg"
+    bgPage.Export svgPath
+    ExportBackgroundSvg = svgPath
+    Exit Function
+fail:
+    Warn "Could not export background page to SVG: " & Err.Description
 End Function
 
 ' Lowercase, non-alphanumerics -> single hyphen, trimmed. "Magic Kingdom" -> "magic-kingdom".
@@ -719,13 +771,20 @@ Private Function MapExtentJson(pg As Visio.Page) As String
             Next i
         End If
     Next shp
-    If Not found Then
-        Warn "No shape on layer '" & BG_LAYER & "' - map extent not exported (background won't auto-align)."
-        MapExtentJson = "null"
-    Else
+    If found Then
         MapExtentJson = "{ ""x"": " & CLng(minX) & ", ""y"": " & CLng(minY) & _
             ", ""w"": " & CLng(maxX - minX) & ", ""h"": " & CLng(maxY - minY) & " }"
+        Exit Function
     End If
+    ' new model: the map is the background PAGE, which fills the content page, so
+    ' the extent is the whole page (node px already span 0..pageW x 0..pageH).
+    If Not BackgroundPageOf(pg) Is Nothing Then
+        Dim pw As Double: pw = pg.PageSheet.CellsU("PageWidth").ResultIU
+        MapExtentJson = "{ ""x"": 0, ""y"": 0, ""w"": " & CLng(pw * PPI) & ", ""h"": " & CLng(mPageH * PPI) & " }"
+        Exit Function
+    End If
+    Warn "No BG_LAYER shape and no background page - map extent not exported (background won't auto-align)."
+    MapExtentJson = "null"
 End Function
 
 ' True if a shape belongs to a layer with the given name.
