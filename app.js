@@ -2455,6 +2455,9 @@ function renderSunFooter() {
       ticks += '<div class="sf-tick" style="left:' + left + '%"></div>';
       if ((hh - startH) % lblEvery === 0) labels += '<div class="sf-lbl" style="left:' + left + '%">' + hourLabel(hh % 24) + '</div>';
     }
+    // label the actual start time when the nearest hour label is >15 min away
+    // (e.g. a 12:01 start whose first hour tick is 1p). Left-aligned so 0% doesn't clip.
+    if (startH * 60 - planStart > 15) labels = '<div class="sf-lbl" style="left:0;transform:none">' + sunNowLabel(planStart) + '</div>' + labels;
     const blocks = [];
     // kind: "sun" (outdoor/hot), "shade" (shaded queue — cool but not AC), "ac" (indoor)
     const add = (a, b, kind, label, step) => { if (b > a) blocks.push({ a: a, b: b, kind: kind, label: label, step: step }); };
