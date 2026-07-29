@@ -610,14 +610,19 @@ Private Function ExportBackgroundSvg(mapPage As Visio.Page, dataPage As Visio.Pa
     bw = Format$(mapPage.PageSheet.CellsU("PageWidth").ResultIU, "0.00")
     bh = Format$(mapPage.PageSheet.CellsU("PageHeight").ResultIU, "0.00")
     If cw <> bw Or ch <> bh Then _
-        Warn "Background page '" & mapPage.Name & "' (" & bw & "x" & bh & " in) differs from the content page (" & cw & "x" & ch & " in); backdrop will be stretched."
+        Warn "Map page '" & mapPage.Name & "' (" & bw & "x" & bh & " in) differs from the content page (" & cw & "x" & ch & " in); keep them the same size so nodes don't fall outside the backdrop."
     Dim svgPath As String: svgPath = f & "background.svg"
-    ' Page.Export follows the active window: show the map to export it, then leave
-    ' the view on the data (foreground) page.
+    ' Selection.Export crops the SVG to the shapes' bounding box (Page.Export proved
+    ' unreliable). MapExtentJson matches the extent to that same box. Show the map
+    ' page, select all, export, then return the view to the data page.
     Set win = Visio.ActiveWindow
-    If Not win Is Nothing Then win.Page = mapPage.Name
-    mapPage.Export svgPath
-    If Not win Is Nothing Then win.Page = dataPage.Name
+    If win Is Nothing Then Exit Function
+    win.Page = mapPage.Name
+    win.SelectAll
+    DoEvents
+    win.Selection.Export svgPath
+    win.DeselectAll
+    win.Page = dataPage.Name
     ExportBackgroundSvg = svgPath
     Exit Function
 fail:
@@ -814,12 +819,26 @@ Private Function MapExtentJson(pg As Visio.Page) As String
             ", ""w"": " & CLng(maxX - minX) & ", ""h"": " & CLng(maxY - minY) & " }"
         Exit Function
     End If
-    ' new model: the map is the background PAGE, which fills the content page, so
-    ' the extent is the whole page (node px already span 0..pageW x 0..pageH).
-    If Not BackgroundPageOf(pg) Is Nothing Then
-        Dim pw As Double: pw = pg.PageSheet.CellsU("PageWidth").ResultIU
-        MapExtentJson = "{ ""x"": 0, ""y"": 0, ""w"": " & CLng(pw * PPI) & ", ""h"": " & CLng(mPageH * PPI) & " }"
-        Exit Function
+    ' new model: the map is on the background page. Match the extent to the bounding
+    ' box of that page's shapes (in node px) — Selection.Export crops the SVG to the
+    ' same box, so the two line up even when the drawing has margin on the page.
+    Dim mp As Visio.Page: Set mp = BackgroundPageOf(pg)
+    If Not mp Is Nothing Then
+        If mp.Shapes.Count > 0 Then
+            Dim sh As Visio.Shape, l As Double, bt As Double, rt As Double, tp As Double
+            Dim mnX As Double, mnY As Double, mxX As Double, mxY As Double
+            mnX = 1E+30: mnY = 1E+30: mxX = -1E+30: mxY = -1E+30
+            For Each sh In mp.Shapes
+                sh.BoundingBox visBBoxUprightWH, l, bt, rt, tp   ' page inches
+                If l < mnX Then mnX = l
+                If bt < mnY Then mnY = bt
+                If rt > mxX Then mxX = rt
+                If tp > mxY Then mxY = tp
+            Next sh
+            MapExtentJson = "{ ""x"": " & CLng(mnX * PPI) & ", ""y"": " & CLng((mPageH - mxY) * PPI) & _
+                ", ""w"": " & CLng((mxX - mnX) * PPI) & ", ""h"": " & CLng((mxY - mnY) * PPI) & " }"
+            Exit Function
+        End If
     End If
     Warn "No BG_LAYER shape and no background page - map extent not exported (background won't auto-align)."
     MapExtentJson = "null"
