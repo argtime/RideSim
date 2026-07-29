@@ -169,6 +169,7 @@ Private mScaleIds As Collection            ' "k"&Shape.ID of ScaleStart/ScaleEnd
 Private mTrackIds As Collection            ' "k"&Shape.ID of Track-layer shapes
 Private mQueueIds As Collection            ' "k"&Shape.ID of Queue-layer shapes
 Private mDataPage As Visio.Page            ' resolved data (foreground) page for this export
+Private mSvgWin As Double, mSvgHin As Double  ' exported map SVG size in inches (0 if none)
 Private mWarnings As Collection
 
 '------------------------------------------------------------------------------
@@ -199,6 +200,11 @@ Public Sub ExportRideSim()
     Set mTrackIds = New Collection
     Set mQueueIds = New Collection
     Set mWarnings = New Collection
+
+    ' Export the map SVG up front (after mWarnings exists, since it may Warn) so
+    ' MapExtentJson can read its exact bounds below.
+    mSvgWin = 0: mSvgHin = 0
+    Dim svgOut As String: svgOut = ExportBackgroundSvg(mapPage, pg)
 
     Dim shp As Visio.Shape, v As Variant
     Dim nodesJson As String, attrJson As String, connJson As String
@@ -530,7 +536,6 @@ Public Sub ExportRideSim()
               savedTo & vbCrLf & "Paste the blocks in manually."
     End If
 
-    Dim svgOut As String: svgOut = ExportBackgroundSvg(mapPage, pg)
     If svgOut <> "" Then msg = msg & vbCrLf & vbCrLf & "Background page exported to:" & vbCrLf & svgOut
 
     If mWarnings.Count > 0 Then
@@ -623,12 +628,36 @@ Private Function ExportBackgroundSvg(mapPage As Visio.Page, dataPage As Visio.Pa
     win.Selection.Export svgPath
     win.DeselectAll
     win.Page = dataPage.Name
+    ReadSvgSize svgPath                 ' capture the exact SVG bounds for MapExtentJson
     ExportBackgroundSvg = svgPath
     Exit Function
 fail:
     On Error Resume Next
     If Not win Is Nothing Then win.Page = dataPage.Name
     Warn "Could not export background page to SVG: " & Err.Description
+End Function
+' Read width/height (inches) from the exported SVG header into mSvgWin/mSvgHin.
+' These are the actual bounds Visio wrote (which can exceed the page), so the app
+' scales the backdrop 1:1.
+Private Sub ReadSvgSize(path As String)
+    On Error Resume Next
+    Dim fnum As Integer: fnum = FreeFile
+    Open path For Binary Access Read As #fnum
+    Dim n As Long: n = LOF(fnum): If n > 2000 Then n = 2000
+    Dim head As String: head = Space$(n)
+    Get #fnum, 1, head
+    Close #fnum
+    mSvgWin = SvgInches(head, "width")
+    mSvgHin = SvgInches(head, "height")
+End Sub
+' First  attr="<number>in"  value in an SVG header, as inches (0 if not found).
+Private Function SvgInches(head As String, attr As String) As Double
+    Dim p As Long: p = InStr(1, head, attr & "=""", vbTextCompare)
+    If p = 0 Then Exit Function
+    p = p + Len(attr) + 2
+    Dim q As Long: q = InStr(p, head, "in""")
+    If q = 0 Or q <= p Then Exit Function
+    SvgInches = Val(Trim$(Mid$(head, p, q - p)))
 End Function
 
 ' Lowercase, non-alphanumerics -> single hyphen, trimmed. "Magic Kingdom" -> "magic-kingdom".
@@ -798,11 +827,18 @@ Private Function MapExtentJson(pg As Visio.Page) As String
     ' Identical page sizes -> { 0, 0, pageW, pageH }. A stray "Bck" shape is ignored.
     Dim mp As Visio.Page: Set mp = BackgroundPageOf(pg)
     If Not mp Is Nothing Then
-        Dim mpw As Double, mph As Double
-        mpw = mp.PageSheet.CellsU("PageWidth").ResultIU
-        mph = mp.PageSheet.CellsU("PageHeight").ResultIU
-        MapExtentJson = "{ ""x"": 0, ""y"": " & CLng((mPageH - mph) * PPI) & _
-            ", ""w"": " & CLng(mpw * PPI) & ", ""h"": " & CLng(mph * PPI) & " }"
+        ' Use the ACTUAL exported SVG size (read from the file) so the app scales it
+        ' 1:1 — Visio's SVG bounds can exceed the page. Fall back to the map page
+        ' size if the SVG wasn't read. Shift down by the data/map page-height diff.
+        Dim ew As Double, eh As Double
+        If mSvgWin > 0 And mSvgHin > 0 Then
+            ew = mSvgWin: eh = mSvgHin
+        Else
+            ew = mp.PageSheet.CellsU("PageWidth").ResultIU
+            eh = mp.PageSheet.CellsU("PageHeight").ResultIU
+        End If
+        MapExtentJson = "{ ""x"": 0, ""y"": " & CLng((mPageH - eh) * PPI) & _
+            ", ""w"": " & CLng(ew * PPI) & ", ""h"": " & CLng(eh * PPI) & " }"
         Exit Function
     End If
     ' Legacy: bounding box of a shape on the BG_LAYER layer of THIS page (you supply
