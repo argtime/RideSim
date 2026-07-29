@@ -1326,37 +1326,50 @@ function drawLeaderStem(x1, y1, x2, y2, fs) {
   ctx.lineWidth = Math.max(1, fs * 0.07); ctx.strokeStyle = "rgba(8,15,25,0.85)";
   ctx.fillStyle = "rgba(234,242,255,0.95)"; ctx.fill(); ctx.stroke();
 }
-// Once zoomed past LABEL_ZOOM, draw each visible attraction's name (fading in over
-// a short range so it doesn't pop). Default position is centred below the circle;
-// a shape's control point (a.labelPos) overrides that, centring the label there
-// with the leader pointing at it. Skips pins/restrooms and off-screen circles;
-// while animating, only plan stops show. Font grows sub-linearly (sqrt).
-function drawZoomedNames() {
-  if (userZoom < LABEL_ZOOM) return;
-  const alpha = Math.max(0, Math.min(1, (userZoom - LABEL_ZOOM) / 0.6));
-  if (alpha <= 0) return;
+// Category priority for the always-on labels: the first of these that's visible
+// on the map gets its names shown at ALL zooms. Every other category's names fade
+// in only once zoomed past LABEL_ZOOM. So at a glance one category is labelled
+// (uncluttered), and zooming reveals the rest.
+const LABEL_PRIORITY = ["ride", "restaurant", "shop", "pin", "restroom", "other"];
+function primaryLabelCat() {
+  for (let i = 0; i < LABEL_PRIORITY.length; i++) if (catFilter[LABEL_PRIORITY[i]]) return LABEL_PRIORITY[i];
+  return null;
+}
+// Draw attraction names. The primary (first-visible) category is always shown;
+// others fade in past LABEL_ZOOM. Default position is centred below the circle; a
+// shape's control point (a.labelPos) overrides that, centring the label there with
+// the leader pointing at it. While animating, only plan stops show. Font ~sqrt(zoom).
+function drawMapLabels() {
+  const primary = primaryLabelCat();
+  const zoomA = Math.max(0, Math.min(1, (userZoom - LABEL_ZOOM) / 0.6));
+  if (!primary && zoomA <= 0) return;
   const w = canvas.clientWidth, h = canvas.clientHeight, sz = attrSize();
   const fs = 10 * Math.sqrt(userZoom);
   ctx.textAlign = "center"; ctx.textBaseline = "top";
   ctx.font = "600 " + fs.toFixed(1) + "px -apple-system,Segoe UI,Roboto,sans-serif";
-  ctx.lineWidth = Math.max(1.5, fs * 0.14); ctx.lineJoin = "round";   // light halo, just enough for legibility
+  ctx.lineJoin = "round";
   state.attractions.forEach(a => {
     const inSeq = seqIndexOf(a.id), cat = attrCat(a);
     if (!catFilter[cat] && inSeq < 0) return;      // filtered out
     if (playing && inSeq < 0) return;              // while animating, only plan stops
-    if (cat === "pin" || cat === "restroom") return;   // pins & restrooms: no name label
+    // primary category is always labelled; others fade in with zoom (minor POIs excluded)
+    let alpha;
+    if (cat === primary) alpha = 1;
+    else if (zoomA > 0 && cat !== "pin" && cat !== "restroom") alpha = zoomA;
+    else return;
     const loc = a.displayLocation || state.nodes.get(a.entranceNodeId);
     if (!loc) return;
     const X = tx(loc.x), Y = ty(loc.y);
     if (X < -60 || X > w + 60 || Y < -20 || Y > h + 40) return;   // only what's on screen
+    const r = sz.r * (cat === "pin" || cat === "other" ? 0.5 : 1);   // pins/other draw at half radius
     const name = a.name || a.id;
     ctx.globalAlpha = alpha;
     if (a.labelPos) {
       // custom placement: centre the label on the shape's control point; leader points to it
       const Lx = tx(a.labelPos.x), Ly = ty(a.labelPos.y);
       const dx = Lx - X, dy = Ly - Y, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
-      const endDist = Math.max(sz.r + fs * 0.25, d - fs * 0.85);   // stop the stem short of the text
-      drawLeaderStem(X + ux * sz.r, Y + uy * sz.r, X + ux * endDist, Y + uy * endDist, fs);
+      const endDist = Math.max(r + fs * 0.25, d - fs * 0.85);   // stop the stem short of the text
+      drawLeaderStem(X + ux * r, Y + uy * r, X + ux * endDist, Y + uy * endDist, fs);
       ctx.textBaseline = "middle";
       ctx.lineWidth = Math.max(1.5, fs * 0.14);
       ctx.strokeStyle = "rgba(8,15,25,0.9)"; ctx.strokeText(name, Lx, Ly);
@@ -1364,7 +1377,7 @@ function drawZoomedNames() {
       ctx.textBaseline = "top";
     } else {
       // default: name centred below the circle with a short vertical stem
-      const rEdge = Y + sz.r, labelY = rEdge + Math.max(7, fs * 0.7);
+      const rEdge = Y + r, labelY = rEdge + Math.max(7, fs * 0.7);
       drawLeaderStem(X, rEdge, X, labelY - Math.max(2, fs * 0.12), fs);
       ctx.lineWidth = Math.max(1.5, fs * 0.14);
       ctx.strokeStyle = "rgba(8,15,25,0.9)"; ctx.strokeText(name, X, labelY);
@@ -1564,7 +1577,7 @@ function draw(marker) {
 
   drawShelters("over");   // pink shade (panel expanded) + flashes — above the icons, below labels/avatar
 
-  drawZoomedNames();      // attraction names below their circles, once zoomed in far enough
+  drawMapLabels();        // names: always for the primary category, others fade in when zoomed
 
   if (hoverAttr) {
     const a = state.attractions.get(hoverAttr);
