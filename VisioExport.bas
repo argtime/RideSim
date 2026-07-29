@@ -612,9 +612,9 @@ Private Function ExportBackgroundSvg(mapPage As Visio.Page, dataPage As Visio.Pa
     If cw <> bw Or ch <> bh Then _
         Warn "Map page '" & mapPage.Name & "' (" & bw & "x" & bh & " in) differs from the content page (" & cw & "x" & ch & " in); keep them the same size so nodes don't fall outside the backdrop."
     Dim svgPath As String: svgPath = f & "background.svg"
-    ' Selection.Export crops the SVG to the shapes' bounding box (Page.Export proved
-    ' unreliable). MapExtentJson matches the extent to that same box. Show the map
-    ' page, select all, export, then return the view to the data page.
+    ' For SVG, Selection.Export writes the whole page anyway (Page.Export on the
+    ' object proved unreliable). MapExtentJson uses the map page's own rectangle to
+    ' match. Show the map page, select all, export, then return to the data page.
     Set win = Visio.ActiveWindow
     If win Is Nothing Then Exit Function
     win.Page = mapPage.Name
@@ -819,26 +819,19 @@ Private Function MapExtentJson(pg As Visio.Page) As String
             ", ""w"": " & CLng(maxX - minX) & ", ""h"": " & CLng(maxY - minY) & " }"
         Exit Function
     End If
-    ' new model: the map is on the background page. Match the extent to the bounding
-    ' box of that page's shapes (in node px) — Selection.Export crops the SVG to the
-    ' same box, so the two line up even when the drawing has margin on the page.
+    ' new model: the map is on the background page, and the SVG export is that WHOLE
+    ' page (not a cropped selection). So the extent is the MAP page rectangle — its
+    ' own width/height (so the SVG scales 1:1) shifted down by any page-height
+    ' difference. The pages overlay at the bottom-left origin, but node Y is measured
+    ' from the DATA page's top. Identical page sizes -> { 0, 0, pageW, pageH }.
     Dim mp As Visio.Page: Set mp = BackgroundPageOf(pg)
     If Not mp Is Nothing Then
-        If mp.Shapes.Count > 0 Then
-            Dim sh As Visio.Shape, l As Double, bt As Double, rt As Double, tp As Double
-            Dim mnX As Double, mnY As Double, mxX As Double, mxY As Double
-            mnX = 1E+30: mnY = 1E+30: mxX = -1E+30: mxY = -1E+30
-            For Each sh In mp.Shapes
-                sh.BoundingBox visBBoxUprightWH, l, bt, rt, tp   ' page inches
-                If l < mnX Then mnX = l
-                If bt < mnY Then mnY = bt
-                If rt > mxX Then mxX = rt
-                If tp > mxY Then mxY = tp
-            Next sh
-            MapExtentJson = "{ ""x"": " & CLng(mnX * PPI) & ", ""y"": " & CLng((mPageH - mxY) * PPI) & _
-                ", ""w"": " & CLng((mxX - mnX) * PPI) & ", ""h"": " & CLng((mxY - mnY) * PPI) & " }"
-            Exit Function
-        End If
+        Dim mpw As Double, mph As Double
+        mpw = mp.PageSheet.CellsU("PageWidth").ResultIU
+        mph = mp.PageSheet.CellsU("PageHeight").ResultIU
+        MapExtentJson = "{ ""x"": 0, ""y"": " & CLng((mPageH - mph) * PPI) & _
+            ", ""w"": " & CLng(mpw * PPI) & ", ""h"": " & CLng(mph * PPI) & " }"
+        Exit Function
     End If
     Warn "No BG_LAYER shape and no background page - map extent not exported (background won't auto-align)."
     MapExtentJson = "null"
