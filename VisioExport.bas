@@ -788,9 +788,25 @@ none:
     LabelPosJson = ""
 End Function
 
-' Bounding box (in node px) of the shape(s) on the BG_LAYER layer = where the
-' background.png is stretched. Returns "{ x, y, w, h }" or "null" if none.
+' Where the app stretches background.svg, in node px. Prefers the new background-
+' page model; falls back to a BG_LAYER ("Bck") shape. "null" if neither.
 Private Function MapExtentJson(pg As Visio.Page) As String
+    ' Preferred (new model): the map is on the background page and its SVG export is
+    ' the WHOLE page. The extent is the map page rectangle — its own width/height (so
+    ' the SVG scales 1:1) shifted down by any page-height difference (the pages overlay
+    ' at the bottom-left origin, but node Y is measured from the DATA page's top).
+    ' Identical page sizes -> { 0, 0, pageW, pageH }. A stray "Bck" shape is ignored.
+    Dim mp As Visio.Page: Set mp = BackgroundPageOf(pg)
+    If Not mp Is Nothing Then
+        Dim mpw As Double, mph As Double
+        mpw = mp.PageSheet.CellsU("PageWidth").ResultIU
+        mph = mp.PageSheet.CellsU("PageHeight").ResultIU
+        MapExtentJson = "{ ""x"": 0, ""y"": " & CLng((mPageH - mph) * PPI) & _
+            ", ""w"": " & CLng(mpw * PPI) & ", ""h"": " & CLng(mph * PPI) & " }"
+        Exit Function
+    End If
+    ' Legacy: bounding box of a shape on the BG_LAYER layer of THIS page (you supply
+    ' background.png/.svg yourself).
     Dim shp As Visio.Shape, found As Boolean
     Dim minX As Double, minY As Double, maxX As Double, maxY As Double
     minX = 1E+30: minY = 1E+30: maxX = -1E+30: maxY = -1E+30
@@ -819,21 +835,7 @@ Private Function MapExtentJson(pg As Visio.Page) As String
             ", ""w"": " & CLng(maxX - minX) & ", ""h"": " & CLng(maxY - minY) & " }"
         Exit Function
     End If
-    ' new model: the map is on the background page, and the SVG export is that WHOLE
-    ' page (not a cropped selection). So the extent is the MAP page rectangle — its
-    ' own width/height (so the SVG scales 1:1) shifted down by any page-height
-    ' difference. The pages overlay at the bottom-left origin, but node Y is measured
-    ' from the DATA page's top. Identical page sizes -> { 0, 0, pageW, pageH }.
-    Dim mp As Visio.Page: Set mp = BackgroundPageOf(pg)
-    If Not mp Is Nothing Then
-        Dim mpw As Double, mph As Double
-        mpw = mp.PageSheet.CellsU("PageWidth").ResultIU
-        mph = mp.PageSheet.CellsU("PageHeight").ResultIU
-        MapExtentJson = "{ ""x"": 0, ""y"": " & CLng((mPageH - mph) * PPI) & _
-            ", ""w"": " & CLng(mpw * PPI) & ", ""h"": " & CLng(mph * PPI) & " }"
-        Exit Function
-    End If
-    Warn "No BG_LAYER shape and no background page - map extent not exported (background won't auto-align)."
+    Warn "No background page and no BG_LAYER shape - map extent not exported (background won't auto-align)."
     MapExtentJson = "null"
 End Function
 
