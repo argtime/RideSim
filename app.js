@@ -2470,7 +2470,7 @@ function hourLabel(h) { const ap = h < 12 ? "a" : "p"; let hh = h % 12; if (hh =
 // real clock time (blank before/after the plan), sun = yellow, AC = blue.
 function renderSunFooter() {
   const el = document.getElementById("sunFooter"); if (!el) return;
-  let ticks = "", labels = "", segHtml = "", legend = "";
+  let ticks = "", labels = "", segHtml = "", durHtml = "", legend = "";
   if (state.steps.length) {
     // the bar spans just the plan (first walk -> last ride end), so it fills the
     // width and scrubbing is fine-grained. Everything positions by (min-start)/span.
@@ -2502,18 +2502,36 @@ function renderSunFooter() {
     const KIND = { sun: { c: "#ffcc4d", tip: "Hot" }, shade: { c: "#a9def0", tip: "Shade" }, ac: { c: "var(--accent)", tip: "AC" } };
     segHtml = blocks.map((b, i) => {
       const k = KIND[b.kind];
-      const tip = k.tip + " · " + b.label + " · " + minToHM(b.a) + "–" + minToHM(b.b);
+      const tip = k.tip + " · " + fmtDur(b.b - b.a) + " · " + b.label + " · " + minToHM(b.a) + "–" + minToHM(b.b);
       // 1px black divider between contiguous same-color blocks (none across a color change)
       const div = (i > 0 && blocks[i - 1].kind === b.kind) ? ";border-left:1px solid #000" : "";
       return '<div class="sf-seg" data-step="' + b.step + '" style="left:' + pos(b.a).toFixed(3) +
         '%;width:' + Math.max((b.b - b.a) / span * 100, 0.06).toFixed(3) + '%;background:' + k.c + div + '" title="' + esc(tip) + '"></div>';
     }).join("");
+    // merge contiguous same-colour blocks into runs, and label each run's total
+    // duration on the bar (readable without hover, for mobile). Narrow ones that
+    // can't fit the text are hidden after layout, below.
+    const runs = [];
+    blocks.forEach(b => {
+      const last = runs[runs.length - 1];
+      if (last && last.kind === b.kind && Math.abs(last.b - b.a) < 0.01) last.b = b.b;
+      else runs.push({ a: b.a, b: b.b, kind: b.kind });
+    });
+    durHtml = runs.map(r => '<div class="sf-dur" data-dur="' + Math.round(r.b - r.a) +
+      '" style="left:' + pos((r.a + r.b) / 2).toFixed(3) + '%">' + fmtDur(r.b - r.a) + '</div>').join("");
     const d = sunSegments();
     legend = '<span style="color:#ffcc4d">☀️ ' + fmtDur(d.sun) + '</span><span style="color:var(--accent)">❄️ ' + fmtDur(d.ac) + '</span>';
   }
-  el.innerHTML = '<div class="sf-track">' + ticks + segHtml + '<div class="sf-now" id="sfNow"></div></div>' +
+  el.innerHTML = '<div class="sf-track">' + ticks + segHtml + durHtml + '<div class="sf-now" id="sfNow"></div></div>' +
     '<div class="sf-axis">' + labels + (legend ? '<div class="sf-legend">' + legend + '</div>' : "") +
     '<div class="sf-now-lbl" id="sfNowLbl"></div></div>';
+  // hide any duration label whose run is too narrow to fit its text
+  if (state.steps.length) {
+    const track = el.querySelector(".sf-track"), trackW = track ? track.clientWidth : 0, span = Math.max(1, simSpanMin());
+    if (trackW) el.querySelectorAll(".sf-dur").forEach(d => {
+      if ((+d.dataset.dur / span) * trackW < d.offsetWidth + 4) d.style.visibility = "hidden";
+    });
+  }
   // a rebuild mid-animation (e.g. a plan edit while paused) would drop the cursor
   if (state.steps.length && (playing || animClock > 0)) updateSunNow(state.steps[0].walkStart + animClock);
 }
@@ -3841,7 +3859,7 @@ if (window.ResizeObserver) {
   const ro = new ResizeObserver(() => {
     if (roPending) return;
     roPending = true;
-    requestAnimationFrame(() => { roPending = false; resizeCanvas(); });
+    requestAnimationFrame(() => { roPending = false; resizeCanvas(); renderSunFooter(); });
   });
   ro.observe(canvas);
 }
