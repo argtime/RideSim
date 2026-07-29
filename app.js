@@ -643,7 +643,7 @@ function fetchWeather() {
       el.innerHTML = (showWB ? wbIcon(wb) : "") +
         '<div class="ft-text"><span class="lbl">feels like</span><span class="tm">' + Math.round(feels) + '°</span></div>';
       const sky = skyInfo(c);   // colour the border to hint the sky (night / cloud cover)
-      if (sky) { el.style.borderWidth = "2px"; el.style.borderColor = sky.color; el.title = sky.label; }
+      if (sky) { el.style.borderWidth = "4px"; el.style.borderColor = sky.color; el.title = sky.label; }
       else { el.style.borderWidth = ""; el.style.borderColor = ""; el.title = ""; }
     } else el.style.display = "none";
   }).catch(() => { el.style.display = "none"; });
