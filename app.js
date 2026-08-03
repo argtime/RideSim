@@ -643,7 +643,7 @@ function fetchWeather() {
       el.innerHTML = (showWB ? wbIcon(wb) : "") +
         '<div class="ft-text"><span class="lbl">feels like</span><span class="tm">' + Math.round(feels) + '°</span></div>';
       const sky = skyInfo(c);   // colour the border to hint the sky (night / cloud cover)
-      if (sky) { el.style.borderWidth = "4px"; el.style.borderColor = sky.color; el.title = sky.label; }
+      if (sky) { el.style.borderWidth = "6px"; el.style.borderColor = sky.color; el.title = sky.label; }
       else { el.style.borderWidth = ""; el.style.borderColor = ""; el.title = ""; }
     } else el.style.display = "none";
   }).catch(() => { el.style.display = "none"; });
@@ -1125,6 +1125,7 @@ function clampPan() {
 }
 // Zoom by `factor` about a canvas-relative screen point, keeping that point fixed.
 function zoomAt(sx, sy, factor) {
+  cancelMomentum();
   const prev = userZoom;
   userZoom = Math.max(1, Math.min(MAX_ZOOM, userZoom * factor));
   if (userZoom === prev) return;
@@ -1134,7 +1135,7 @@ function zoomAt(sx, sy, factor) {
   clampPan();
   applyView();
 }
-function resetView() { userZoom = 1; panX = 0; panY = 0; clampPan(); applyView(); draw(); }
+function resetView() { cancelMomentum(); userZoom = 1; panX = 0; panY = 0; clampPan(); applyView(); draw(); }
 
 // On phones the map occupies far less screen space, so the fixed-size
 // attraction markers look oversized and overlap. Shrink them on the same
@@ -2702,6 +2703,7 @@ function simSpanMin() {
 
 function play() {
   if (!state.steps.length) return;
+  cancelMomentum();   // stop any pan glide before the chase-cam takes over
   clearSelection();   // drop any tap-selection highlight before animating
   playing = true;
   followCam = true; camSnap = true;   // re-enable the chase-cam each time playback starts/resumes
@@ -3699,9 +3701,42 @@ function overLabel(ev) {
 // ---- Drag-to-pan the zoomed-in map (normal mode only, once zoomed past fit) ----
 let vpStart = null, vpPanning = false, vpClickSuppressed = false;
 let touchActive = false;                 // a touch gesture owns the canvas — ignore emulated mouse
+// ---- Pan momentum: after a flick, keep panning and decelerate to a stop --------
+let panVelX = 0, panVelY = 0, panLastX = 0, panLastY = 0, panLastT = 0, momentumRAF = null;
+function panVelReset() { panVelX = 0; panVelY = 0; panLastT = 0; }
+function panVelTrack(cx, cy) {           // EMA of pointer velocity in px/ms, favouring recent samples
+  const t = performance.now();
+  if (panLastT) {
+    const dt = t - panLastT;
+    if (dt > 0) {
+      panVelX = panVelX * 0.4 + ((cx - panLastX) / dt) * 0.6;
+      panVelY = panVelY * 0.4 + ((cy - panLastY) / dt) * 0.6;
+    }
+  }
+  panLastX = cx; panLastY = cy; panLastT = t;
+}
+function cancelMomentum() { if (momentumRAF) { cancelAnimationFrame(momentumRAF); momentumRAF = null; } }
+function startMomentum() {
+  if (!panLastT || performance.now() - panLastT > 60) return;   // paused before release -> no flick
+  if (Math.hypot(panVelX, panVelY) < 0.06) return;              // too slow (px/ms)
+  cancelMomentum();
+  let last = performance.now();
+  const step = () => {
+    const now = performance.now(), dt = now - last; last = now;
+    const px0 = panX, py0 = panY;
+    panX += panVelX * dt; panY += panVelY * dt;
+    const decay = Math.pow(0.04, dt / 1000);          // ~4% of the speed left after 1s
+    panVelX *= decay; panVelY *= decay;
+    clampPan(); applyView(); draw();
+    if ((panX === px0 && panY === py0) || Math.hypot(panVelX, panVelY) < 0.02) { momentumRAF = null; return; }
+    momentumRAF = requestAnimationFrame(step);
+  };
+  momentumRAF = requestAnimationFrame(step);
+}
 canvas.addEventListener("mousedown", (ev) => {
   if (touchActive) return;               // emulated from touch; the touch handlers drive pan
   if (ev.button !== 0 || addMode || bgAdjust || userZoom <= 1) return;
+  cancelMomentum(); panVelReset();
   vpStart = { x: ev.clientX, y: ev.clientY, panX, panY };
   vpPanning = false;
 });
@@ -3709,10 +3744,10 @@ window.addEventListener("mousemove", (ev) => {
   if (!vpStart) return;
   const dx = ev.clientX - vpStart.x, dy = ev.clientY - vpStart.y;
   if (!vpPanning && Math.hypot(dx, dy) > 4) { vpPanning = true; followCam = false; hideSegTip(); canvas.style.cursor = "grabbing"; }
-  if (vpPanning) { panX = vpStart.panX + dx; panY = vpStart.panY + dy; clampPan(); applyView(); draw(); }
+  if (vpPanning) { panX = vpStart.panX + dx; panY = vpStart.panY + dy; panVelTrack(ev.clientX, ev.clientY); clampPan(); applyView(); draw(); }
 });
 window.addEventListener("mouseup", () => {
-  if (vpStart && vpPanning) vpClickSuppressed = true;   // swallow the click that ends a pan drag
+  if (vpStart && vpPanning) { vpClickSuppressed = true; startMomentum(); }   // fling on release
   vpStart = null; vpPanning = false; canvas.style.cursor = "";
 });
 // ---- Touch: two-finger pinch-to-zoom, one-finger drag-to-pan (when zoomed) ----
@@ -3722,6 +3757,7 @@ function touchMid(a, b) { const r = canvas.getBoundingClientRect(); return { x: 
 canvas.addEventListener("touchstart", (e) => {
   vpClickSuppressed = false;             // fresh gesture; a lingering flag must not eat this tap
   touchActive = true;
+  cancelMomentum();
   if (addMode || bgAdjust) return;       // those modes keep their own (emulated) handling
   if (e.touches.length === 2) {
     touchPan = null;
@@ -3735,6 +3771,7 @@ canvas.addEventListener("touchstart", (e) => {
     e.preventDefault();
   } else if (e.touches.length === 1 && userZoom > 1) {
     const t = e.touches[0];
+    panVelReset();
     touchPan = { x: t.clientX, y: t.clientY, panX, panY, moved: false };
     // no preventDefault yet: a stationary touch should still fall through to tap-to-add
   }
@@ -3754,14 +3791,17 @@ canvas.addEventListener("touchmove", (e) => {
     if (!touchPan.moved && Math.hypot(dx, dy) > 6) { touchPan.moved = true; followCam = false; hideSegTip(); }
     if (touchPan.moved) {
       panX = touchPan.panX + dx; panY = touchPan.panY + dy;
+      panVelTrack(t.clientX, t.clientY);
       clampPan(); applyView(); draw();
       e.preventDefault();               // now we own the gesture: no page scroll, no trailing tap
     }
   }
 }, { passive: false });
 canvas.addEventListener("touchend", (e) => {
-  if (pinch || (touchPan && touchPan.moved)) vpClickSuppressed = true;  // swallow the tap that ends a gesture
+  const wasPan = touchPan && touchPan.moved;
+  if (pinch || wasPan) vpClickSuppressed = true;  // swallow the tap that ends a gesture
   if (e.touches.length === 0) {
+    if (wasPan) startMomentum();                  // fling on release
     pinch = null; touchPan = null;
     setTimeout(() => { touchActive = false; }, 350);   // let emulated mouse/click settle first
   } else if (e.touches.length === 1 && pinch) {         // lifted one finger of a pinch -> keep panning
