@@ -2840,18 +2840,24 @@ function persistentScaleBefore(stepIndex) {
 // so it stays one consistent size. Transient: it doesn't compound into pBase.
 const RIDE_AVATAR_SHRINK = 0.5;
 
-// Chase-cam: pan so the avatar sits at the viewport center. Smoothed (lerp) so a
-// ride's spin/orbit doesn't swirl the map; snaps instantly on the first frame of
-// playback. clampPan() keeps the map covering the viewport near the edges. No-op
-// at fit (userZoom === 1), where the whole map is already visible.
+// Chase-cam: keep the avatar inside a centred dead-zone box (25% x 25% of the
+// viewport) — only pan when it leaves the box, easing it back to the nearest edge.
+// So small moves and ride-spin (which stay in the box) don't shift the map at all.
+// clampPan() keeps the map covering the viewport near the edges. No-op at fit.
 function followAvatar(m) {
   const w = canvas.clientWidth, h = canvas.clientHeight;
-  const targetX = w / 2 - (m.x * fitView.scale + fitView.ox) * userZoom;
-  const targetY = h / 2 - (m.y * fitView.scale + fitView.oy) * userZoom;
-  const k = camSnap ? 1 : 0.15;   // snap on the first frame, then ease (damps ride-spin wobble)
+  const avX = (m.x * fitView.scale + fitView.ox) * userZoom + panX;   // avatar's screen x
+  const avY = (m.y * fitView.scale + fitView.oy) * userZoom + panY;
+  const dzX = w * 0.125, dzY = h * 0.125;   // half of the 25% dead-zone box
+  let dPanX = 0, dPanY = 0;                  // pan needed to pull the avatar back to the box edge
+  if (avX < w / 2 - dzX) dPanX = (w / 2 - dzX) - avX;
+  else if (avX > w / 2 + dzX) dPanX = (w / 2 + dzX) - avX;
+  if (avY < h / 2 - dzY) dPanY = (h / 2 - dzY) - avY;
+  else if (avY > h / 2 + dzY) dPanY = (h / 2 + dzY) - avY;
+  const k = camSnap ? 1 : 0.15;   // snap to the box on the first frame, then ease
   camSnap = false;
-  panX += (targetX - panX) * k;
-  panY += (targetY - panY) * k;
+  panX += dPanX * k;
+  panY += dPanY * k;
   clampPan(); applyView();
 }
 function renderAnimAt(clock) {
