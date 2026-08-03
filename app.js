@@ -3731,7 +3731,7 @@ function startMomentum() {
     const now = performance.now(), dt = now - last; last = now;
     const px0 = panX, py0 = panY;
     panX += panVelX * dt; panY += panVelY * dt;
-    const decay = Math.pow(0.04, dt / 1000);          // ~4% of the speed left after 1s
+    const decay = Math.pow(0.025, dt / 1000);         // ~2.5% of the speed left after 1s
     panVelX *= decay; panVelY *= decay;
     clampPan(); applyView(); draw();
     if ((panX === px0 && panY === py0) || Math.hypot(panVelX, panVelY) < 0.02) { momentumRAF = null; return; }
