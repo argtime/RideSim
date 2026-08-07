@@ -26,8 +26,8 @@
     --transit: #46c6b8;
 
     /* -- Map icon fills — off = not in your plan, on = in your plan ------- */
-    --icon-ride-off: #ffcc4d;       --icon-ride-on: #5cc8ff;
-    --icon-restaurant-off: #57d9a3; --icon-restaurant-on: #2bb487;
+    --icon-ride-off: #1c468e;       --icon-ride-on: #1c468e;
+    --icon-restaurant-off: #ffcc4d; --icon-restaurant-on: #ffcc4d;
     --icon-shop-off: #c08cff;       --icon-shop-on: #9b6bff;
     --icon-pin-off: #ff8aa8;        --icon-pin-on: #ff5d86;
     --icon-restroom-off: #6cb8e6;   --icon-restroom-on: #3a93d6;

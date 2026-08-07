@@ -1551,13 +1551,14 @@ function draw(marker) {
         // keep the normal fill; convey the wait with a coloured ring whose width
         // grows with the wait, and show the number in the middle.
         fill = inSeq >= 0 ? ATTR_COLORS[cat].on : ATTR_COLORS[cat].off;
-        inside = String(live.wait); insideColor = "#08263a";
+        inside = String(live.wait); insideColor = textOn(fill);
         waitStrokeColor = waitColor(live.wait);
         waitStrokeW = (1.5 + Math.min(1, live.wait / 90) * 6) * uiZoom();   // ~1.5px (short) .. 7.5px (90m+)
       }
     } else {
       fill = inSeq >= 0 ? ATTR_COLORS[cat].on : ATTR_COLORS[cat].off;
       inside = (inSeq >= 0 && cat !== "pin") ? String(inSeq + 1) : "";  // too small to hold a number
+      insideColor = textOn(fill);
     }
     ctx.globalAlpha = 0.7;                              // named nodes 30% transparent (fill + stroke)
     ctx.beginPath(); ctx.arc(X, Y, radius, 0, 7);
@@ -1819,6 +1820,13 @@ function llMinutesUntil(ll) {
   if (!ll || !ll.start) return null;
   const d = new Date(ll.start); if (isNaN(d.getTime())) return null;
   return Math.max(0, Math.round((d.getTime() - Date.now()) / 60000));
+}
+// Legible label colour for a given fill (hex): white on dark fills, dark on light.
+function textOn(hex) {
+  const h = (hex || "").replace("#", "");
+  if (h.length < 6) return "#08263a";
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) < 140 ? "#fff" : "#08263a";
 }
 function waitColor(w) {
   if (w <= 15) return WAIT_SCALE[0];
