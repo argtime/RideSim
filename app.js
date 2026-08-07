@@ -1529,6 +1529,7 @@ function draw(marker) {
     const ll = showLL ? llAvail(a) : null;          // AVAILABLE Lightning Lane (countdown takes over the center)
     // pins are points of interest — half the diameter of other markers
     let radius = (hot ? sz.hot : sz.r) * (cat === "pin" || cat === "other" ? 0.5 : 1), fill, inside = "", insideColor = "#08263a", closedFace = false;
+    let waitStrokeColor = null, waitStrokeW = 0;   // live wait shown as a ring: color + width ∝ wait
     if (attrClosed(a)) {
       // authored (long-term / seasonal) closure — sad face, can't be planned. Wins
       // over any live data. Keeps the order number if it's somehow already in a plan.
@@ -1546,7 +1547,14 @@ function draw(marker) {
     } else if (liveShow) {
       radius += 3;                                  // a touch bigger to fit the number
       if (!live.open) { fill = CLOSED_COLOR; inside = "✕"; insideColor = "#fff"; }   // just down right now (API) — still plannable
-      else { fill = waitColor(live.wait); inside = String(live.wait); insideColor = "#fff"; }
+      else {
+        // keep the normal fill; convey the wait with a coloured ring whose width
+        // grows with the wait, and show the number in the middle.
+        fill = inSeq >= 0 ? ATTR_COLORS[cat].on : ATTR_COLORS[cat].off;
+        inside = String(live.wait); insideColor = "#08263a";
+        waitStrokeColor = waitColor(live.wait);
+        waitStrokeW = (1.5 + Math.min(1, live.wait / 90) * 6) * uiZoom();   // ~1.5px (short) .. 7.5px (90m+)
+      }
     } else {
       fill = inSeq >= 0 ? ATTR_COLORS[cat].on : ATTR_COLORS[cat].off;
       inside = (inSeq >= 0 && cat !== "pin") ? String(inSeq + 1) : "";  // too small to hold a number
@@ -1554,7 +1562,11 @@ function draw(marker) {
     ctx.globalAlpha = 0.7;                              // named nodes 30% transparent (fill + stroke)
     ctx.beginPath(); ctx.arc(X, Y, radius, 0, 7);
     ctx.fillStyle = fill; ctx.fill();
-    ctx.lineWidth = 2; ctx.strokeStyle = hot ? "#fff" : "#0f1420"; ctx.stroke();
+    ctx.lineWidth = 2; ctx.strokeStyle = hot ? "#fff" : "#0f1420"; ctx.stroke();   // base rim
+    if (waitStrokeColor) {                          // wait ring just outside the rim (colour + width ∝ wait)
+      ctx.beginPath(); ctx.arc(X, Y, radius + 1 + waitStrokeW / 2, 0, 7);
+      ctx.lineWidth = waitStrokeW; ctx.strokeStyle = waitStrokeColor; ctx.stroke();
+    }
     if (closedFace) {
       drawSadFace(X, Y, radius, "#fff");
     } else if (inside) {
