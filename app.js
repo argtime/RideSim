@@ -1565,8 +1565,13 @@ function draw(marker) {
     ctx.fillStyle = fill; ctx.fill();
     ctx.lineWidth = 2; ctx.strokeStyle = hot ? "#fff" : "#0f1420"; ctx.stroke();   // base rim
     if (waitStrokeColor) {                          // wait ring just outside the rim (colour + width ∝ wait)
-      ctx.beginPath(); ctx.arc(X, Y, radius + 1 + waitStrokeW / 2, 0, 7);
+      const ringR = radius + 1 + waitStrokeW / 2;
+      ctx.globalAlpha = 1;                            // full opacity so the ring + its outline read over the map
+      ctx.beginPath(); ctx.arc(X, Y, ringR, 0, 7);   // black backing -> thin outline on both edges
+      ctx.lineWidth = waitStrokeW + 2; ctx.strokeStyle = "#0f1420"; ctx.stroke();
+      ctx.beginPath(); ctx.arc(X, Y, ringR, 0, 7);
       ctx.lineWidth = waitStrokeW; ctx.strokeStyle = waitStrokeColor; ctx.stroke();
+      ctx.globalAlpha = 0.7;                          // restore for the number/badge drawn below
     }
     if (closedFace) {
       drawSadFace(X, Y, radius, "#fff");
