@@ -3819,12 +3819,16 @@ canvas.addEventListener("touchmove", (e) => {
     e.preventDefault();
   } else if (touchPan && e.touches.length === 1) {
     const t = e.touches[0], dx = t.clientX - touchPan.x, dy = t.clientY - touchPan.y;
+    // Own the gesture from the very first move (touchPan only exists when zoomed in).
+    // iOS decides scroll-vs-not on the first touchmove, so waiting for the 6px
+    // threshold let it steal the vertical drag into a page scroll (also starving the
+    // flick of samples). Preventing here doesn't affect a stationary tap-to-add.
+    e.preventDefault();
     if (!touchPan.moved && Math.hypot(dx, dy) > 6) { touchPan.moved = true; followCam = false; hideSegTip(); }
     if (touchPan.moved) {
       panX = touchPan.panX + dx; panY = touchPan.panY + dy;
       panVelTrack(t.clientX, t.clientY);
       clampPan(); applyView(); draw();
-      e.preventDefault();               // now we own the gesture: no page scroll, no trailing tap
     }
   }
 }, { passive: false });
