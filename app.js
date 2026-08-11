@@ -3785,32 +3785,46 @@ window.addEventListener("mouseup", () => {
 let pinch = null;      // active 2-finger gesture: { startDist, startZoom, mapX, mapY }
 let touchPan = null;   // active 1-finger pan: { x, y, panX, panY, moved }
 function touchMid(a, b) { const r = canvas.getBoundingClientRect(); return { x: (a.clientX + b.clientX) / 2 - r.left, y: (a.clientY + b.clientY) / 2 - r.top }; }
+// Tap zoom: double-tap on empty map zooms in, two-finger tap zooms out.
+let tapDown = null, lastTapT = 0, lastTapX = 0, lastTapY = 0;
+const ZOOM_STEP = 2;   // zoom factor per double-tap / two-finger-tap
+// true if a point (client px) is over bare map — not an attraction or its open label,
+// so a double-tap there is a zoom and never hijacks the tap-an-icon / tap-label-to-add flow.
+function tapOnEmpty(cx, cy) {
+  const ev = { clientX: cx, clientY: cy };
+  return !attractionAt(ev) && !(labelHit && overLabel(ev));
+}
 canvas.addEventListener("touchstart", (e) => {
   vpClickSuppressed = false;             // fresh gesture; a lingering flag must not eat this tap
   touchActive = true;
   cancelMomentum();
   if (addMode || bgAdjust) return;       // those modes keep their own (emulated) handling
   if (e.touches.length === 2) {
-    touchPan = null;
+    touchPan = null; tapDown = null;        // a 2-finger gesture is not a tap
     const a = e.touches[0], b = e.touches[1], m = touchMid(a, b);
     pinch = {
       startDist: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY),
-      startZoom: userZoom,
+      startZoom: userZoom, startT: performance.now(), moved: false,
       mapX: (m.x - view.ox) / view.scale,   // map point under the pinch midpoint (stays anchored)
       mapY: (m.y - view.oy) / view.scale
     };
     e.preventDefault();
-  } else if (e.touches.length === 1 && userZoom > 1) {
+  } else if (e.touches.length === 1) {
     const t = e.touches[0];
-    panVelReset();
-    touchPan = { x: t.clientX, y: t.clientY, panX, panY, moved: false };
+    tapDown = { t: performance.now(), x: t.clientX, y: t.clientY, moved: false };   // for double-tap (any zoom)
+    if (userZoom > 1) { panVelReset(); touchPan = { x: t.clientX, y: t.clientY, panX, panY, moved: false }; }
     // no preventDefault yet: a stationary touch should still fall through to tap-to-add
   }
 }, { passive: false });
 canvas.addEventListener("touchmove", (e) => {
+  if (tapDown && !tapDown.moved && e.touches.length === 1) {
+    const t = e.touches[0];
+    if (Math.hypot(t.clientX - tapDown.x, t.clientY - tapDown.y) > 10) tapDown.moved = true;   // a drag, not a tap
+  }
   if (pinch && e.touches.length >= 2) {
     const a = e.touches[0], b = e.touches[1], m = touchMid(a, b);
     const dist = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+    if (Math.abs(dist - pinch.startDist) > 12) pinch.moved = true;   // a real pinch, not a two-finger tap
     userZoom = Math.max(1, Math.min(MAX_ZOOM, pinch.startZoom * (dist / pinch.startDist)));
     // keep the initial focal map point pinned under the current finger midpoint
     panX = m.x - (pinch.mapX * fitView.scale + fitView.ox) * userZoom;
@@ -3835,11 +3849,31 @@ canvas.addEventListener("touchmove", (e) => {
 canvas.addEventListener("touchend", (e) => {
   const wasPan = touchPan && touchPan.moved;
   if (pinch || wasPan) vpClickSuppressed = true;  // swallow the tap that ends a gesture
+  // Two-finger tap (a pinch that never zoomed, released quickly) -> zoom out one level.
+  const twoFingerTap = pinch && !pinch.moved && e.touches.length < 2 && (performance.now() - pinch.startT) < 300;
+  if (twoFingerTap) {
+    const rect = canvas.getBoundingClientRect(), ct = e.changedTouches[0];
+    const sx = (ct ? ct.clientX : rect.left + rect.width / 2) - rect.left;
+    const sy = (ct ? ct.clientY : rect.top + rect.height / 2) - rect.top;
+    zoomAt(sx, sy, 1 / ZOOM_STEP); draw();
+    vpClickSuppressed = true; pinch = null; touchPan = null; tapDown = null;
+  }
   if (e.touches.length === 0) {
     if (wasPan) startMomentum();                  // fling on release
-    pinch = null; touchPan = null;
+    // Double-tap on empty map -> zoom in (centred on the tap).
+    if (!twoFingerTap && tapDown && !tapDown.moved && !wasPan && (performance.now() - tapDown.t) < 300) {
+      const now = performance.now(), rect = canvas.getBoundingClientRect();
+      const onEmpty = tapOnEmpty(tapDown.x, tapDown.y);
+      if (onEmpty && lastTapT && (now - lastTapT) < 300 && Math.hypot(tapDown.x - lastTapX, tapDown.y - lastTapY) < 30) {
+        zoomAt(tapDown.x - rect.left, tapDown.y - rect.top, ZOOM_STEP); draw();
+        vpClickSuppressed = true; lastTapT = 0;
+      } else {                                    // remember as a possible first tap (empty taps only)
+        lastTapT = onEmpty ? now : 0; lastTapX = tapDown.x; lastTapY = tapDown.y;
+      }
+    }
+    pinch = null; touchPan = null; tapDown = null;
     setTimeout(() => { touchActive = false; }, 350);   // let emulated mouse/click settle first
-  } else if (e.touches.length === 1 && pinch) {         // lifted one finger of a pinch -> keep panning
+  } else if (e.touches.length === 1 && pinch) {         // real pinch, one finger lifted -> keep panning
     const t = e.touches[0]; pinch = null;
     touchPan = userZoom > 1 ? { x: t.clientX, y: t.clientY, panX, panY, moved: true } : null;
   }
