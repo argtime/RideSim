@@ -2863,6 +2863,7 @@ function frame(ts) {
 const RIDE_ANIM_SEC = 8;    // target real-time length of an animated ride
 const AUDIO_SEC = 12;       // target real-time length of an audio stop (so the clip is audible)
 const FF_MAX_SEC = 6;       // a long idle stretch (rest break, long queue) fast-forwards to at most this
+const QUEUE_FF_SEC = 4.5;   // the queue snake plays ~25% quicker than a plain idle
 // A stop worth watching at a fixed real-time pace: an audio clip, or a ride with
 // a spin/track animation. Returns { target } real-seconds, else null.
 function watchableStop(s) {
@@ -2893,7 +2894,7 @@ function dwellFastForward(clock) {
   const absT = state.steps[0].walkStart + clock;
   for (const s of state.steps) {
     if (absT < s.walkEnd) return 0;                                    // walking — worth watching
-    if (absT < s.waitEnd) return s.wait > 0 ? s.wait / FF_MAX_SEC : 0;  // idle in a queue
+    if (absT < s.waitEnd) return s.wait > 0 ? s.wait / QUEUE_FF_SEC : 0;  // queue snake — a touch quicker
     if (absT < s.rideEnd) {                                             // dwelling / riding in place
       if (watchableStop(s)) return 0;                                  // a spin/track/audio stop
       return s.ride > 0 ? s.ride / FF_MAX_SEC : 0;
