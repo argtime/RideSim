@@ -2771,6 +2771,9 @@ function drawFireworks() {
   if (!fireworks.length) return;
   const now = performance.now(), s = view.scale;
   ctx.save();
+  // dusk: darken the daytime map so the additive bursts read as vivid night fireworks
+  ctx.fillStyle = "rgba(6,10,30,0.5)";
+  ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
   ctx.globalCompositeOperation = "lighter";   // additive -> bright & glowy
   fireworks.forEach(f => {
     const p = Math.max(0, Math.min(1, (now - f.t) / f.dur)), X = tx(f.x), Y = ty(f.y);
@@ -2778,7 +2781,7 @@ function drawFireworks() {
       const a = Math.sin(p * Math.PI), r = Math.max(1, f.maxR * a * s);
       const g = ctx.createRadialGradient(X, Y, 0, X, Y, r);
       g.addColorStop(0, "rgba(255,255,245," + (0.95 * a).toFixed(3) + ")");
-      g.addColorStop(0.45, "rgba(" + f.rgb + "," + (0.6 * a).toFixed(3) + ")");
+      g.addColorStop(0.38, "rgba(" + f.rgb + "," + (0.9 * a).toFixed(3) + ")");
       g.addColorStop(1, "rgba(" + f.rgb + ",0)");
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X, Y, r, 0, 7); ctx.fill();
     } else {                                    // coloured core that grows then shoots out rays and fades
