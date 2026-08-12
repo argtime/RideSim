@@ -158,6 +158,9 @@ Private Const TRACK_LAYER As String = "Track"
 ' Layer holding queue-line shapes: a per-ride path the avatar follows while
 ' waiting (entrance -> load). Glue one end into the ride, same as a Track.
 Private Const QUEUE_LAYER As String = "Queue"
+' Layer holding the fireworks launch zone: one shape whose centre is the launch
+' point and whose radius is the sweep over which bursts are randomly placed.
+Private Const FIREWORKS_LAYER As String = "Fireworks"
 ' Transport lines live on layers named "transit_<LineName>" (e.g. transit_Railroad).
 Private Const TRANSIT_PREFIX As String = "transit_"
 
@@ -495,7 +498,7 @@ Public Sub ExportRideSim()
 
     ' --- assemble blocks -----------------------------------------------------
     Dim nodesBlock As String, connBlock As String, attrBlock As String
-    Dim mapBlock As String, scaleBlock As String, transportBlock As String, geoBlock As String, sheltersBlock As String
+    Dim mapBlock As String, scaleBlock As String, transportBlock As String, geoBlock As String, sheltersBlock As String, fireworksBlock As String
     nodesBlock = "SAMPLE.nodes = [" & vbCrLf & nodesJson & vbCrLf & "];"
     connBlock = "SAMPLE.connections = [" & vbCrLf & connJson & vbCrLf & "];"
     attrBlock = "SAMPLE.attractions = [" & vbCrLf & attrJson & vbCrLf & "];"
@@ -503,6 +506,7 @@ Public Sub ExportRideSim()
     transportBlock = "SAMPLE.transport = [" & vbCrLf & transportJson & vbCrLf & "];"
     geoBlock = "SAMPLE.geoAnchors = [" & vbCrLf & geoJson & vbCrLf & "];"
     sheltersBlock = "SAMPLE.shelters = [" & vbCrLf & sheltersJson & vbCrLf & "];"
+    fireworksBlock = "SAMPLE.fireworks = " & FireworksJson(pg) & ";"
 
     Dim ftPerPx As Double: ftPerPx = ComputeScale(pg)
     If ftPerPx > 0 Then
@@ -514,7 +518,7 @@ Public Sub ExportRideSim()
     Dim outText As String   ' plain-text fallback (same blocks, copy/paste-able)
     outText = nodesBlock & vbCrLf & vbCrLf & connBlock & vbCrLf & vbCrLf & _
               attrBlock & vbCrLf & vbCrLf & mapBlock & vbCrLf & vbCrLf & scaleBlock & vbCrLf & vbCrLf & _
-              transportBlock & vbCrLf & vbCrLf & geoBlock & vbCrLf & vbCrLf & sheltersBlock & vbCrLf
+              transportBlock & vbCrLf & vbCrLf & geoBlock & vbCrLf & vbCrLf & sheltersBlock & vbCrLf & vbCrLf & fireworksBlock & vbCrLf
     Debug.Print outText
 
     ' --- emit: patch the park's park.js in place, else write the .txt --------
@@ -522,7 +526,7 @@ Public Sub ExportRideSim()
     Dim msg As String, htmlP As String, didPatch As Boolean
     htmlP = HtmlPath()
     If htmlP <> "" Then
-        If Dir$(htmlP) <> "" Then didPatch = PatchHtml(htmlP, nodesBlock, connBlock, attrBlock, mapBlock, scaleBlock, transportBlock, geoBlock, sheltersBlock)
+        If Dir$(htmlP) <> "" Then didPatch = PatchHtml(htmlP, nodesBlock, connBlock, attrBlock, mapBlock, scaleBlock, transportBlock, geoBlock, sheltersBlock, fireworksBlock)
     End If
     If didPatch Then
         msg = "Wrote " & nodeCount & " nodes, " & connCount & " connections, " & _
@@ -680,7 +684,8 @@ End Function
 ' leaves the file untouched) if any marker is missing.
 Private Function PatchHtml(path As String, nodesBlock As String, connBlock As String, _
                            attrBlock As String, mapBlock As String, scaleBlock As String, _
-                           transportBlock As String, geoBlock As String, sheltersBlock As String) As Boolean
+                           transportBlock As String, geoBlock As String, sheltersBlock As String, _
+                           fireworksBlock As String) As Boolean
     On Error GoTo fail
     Dim s As String: s = ReadTextUtf8(path)
     Dim nl As String: nl = IIf(InStr(s, vbCrLf) > 0, vbCrLf, vbLf)
@@ -699,6 +704,9 @@ Private Function PatchHtml(path As String, nodesBlock As String, connBlock As St
     End If
     If InStr(s, "@RIDESIM:SHELTERS:START") > 0 Then
         s = PatchSection(s, "@RIDESIM:SHELTERS:START", "@RIDESIM:SHELTERS:END", Reflow(sheltersBlock, nl), nl, ok)
+    End If
+    If InStr(s, "@RIDESIM:FIREWORKS:START") > 0 Then
+        s = PatchSection(s, "@RIDESIM:FIREWORKS:START", "@RIDESIM:FIREWORKS:END", Reflow(fireworksBlock, nl), nl, ok)
     End If
     If ok Then WriteTextUtf8NoBom path, s   ' only touch the file if every marker matched
     PatchHtml = ok
@@ -873,6 +881,21 @@ Private Function MapExtentJson(pg As Visio.Page) As String
     End If
     Warn "No background page and no BG_LAYER shape - map extent not exported (background won't auto-align)."
     MapExtentJson = "null"
+End Function
+
+' Fireworks launch zone (node px): centre + radius of the shape on FIREWORKS_LAYER.
+' "null" when there's no such shape (only Magic Kingdom has the layer).
+Private Function FireworksJson(pg As Visio.Page) As String
+    Dim shp As Visio.Shape
+    For Each shp In pg.Shapes
+        If OnLayer(shp, FIREWORKS_LAYER) And MasterRole(shp) = "" And ScaleRole(shp) = "" Then
+            Dim c As Variant: c = CenterPx(shp)
+            Dim r As Double: r = (CN(shp, "Width") + CN(shp, "Height")) / 4 * PPI   ' mean radius, px
+            FireworksJson = "{ ""x"": " & CLng(c(0)) & ", ""y"": " & CLng(c(1)) & ", ""r"": " & CLng(r) & " }"
+            Exit Function
+        End If
+    Next shp
+    FireworksJson = "null"
 End Function
 
 ' True if a shape belongs to a layer with the given name.
