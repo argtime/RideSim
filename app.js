@@ -1642,6 +1642,7 @@ function draw(marker) {
     ctx.strokeStyle = marker.stroke || "#5cc8ff"; ctx.globalAlpha = .4; ctx.stroke(); ctx.globalAlpha = 1;
   }
   drawMyLocation();   // "you are here" GPS dot, on top
+  drawFireworks();    // 10pm finale, over everything
 }
 // A "closed" face inside a marker circle: two X eyes and a downturned mouth,
 // scaled to the circle radius r. Keeps the surrounding disc/stroke as-is.
@@ -2721,9 +2722,71 @@ function highlightSeqStep(stepI) {
   list.scrollTop += (ir.top - lr.top) - (list.clientHeight - item.clientHeight) / 2;
 }
 
+// ---- Fireworks finale ------------------------------------------------------
+// SAMPLE.fireworks = { x, y, r } (node px): centre + radius of the launch zone.
+// Only Magic Kingdom exports it, so the show is naturally park-specific.
+const FW_START_MIN = 22 * 60;                 // 10:00 pm
+const FW_END_MIN = FW_START_MIN + 18;         // an 18-minute show -> 10:18 pm
+const FW_SHOW_SEC = 22;                        // real-time the 18 sim-minutes play over (watchable)
+const FW_COLORS = ["#ff3b3b", "#ff8a1f", "#ffe234", "#4fe05a", "#c264ff"];  // red, orange, yellow, green, purple
+let fireworks = [], fwLastSpawn = 0;
+function makeFirework(zone) {
+  const ang = Math.random() * Math.PI * 2, dist = Math.sqrt(Math.random()) * zone.r;   // uniform over the disc
+  const x = zone.x + Math.cos(ang) * dist, y = zone.y + Math.sin(ang) * dist;
+  if (Math.random() < 0.5) return { type: "A", x, y, t: performance.now(), dur: 1000, maxR: Math.max(14, zone.r * 0.22) };
+  const rays = 15 + Math.floor(Math.random() * 6);   // 15-20 lines
+  const jitter = Math.random() * Math.PI * 2;
+  const angs = Array.from({ length: rays }, (_, i) => jitter + (i / rays) * Math.PI * 2 + (Math.random() - 0.5) * 0.25);
+  return { type: "B", x, y, t: performance.now(), dur: 1400, color: FW_COLORS[(Math.random() * FW_COLORS.length) | 0], rayLen: Math.max(22, zone.r * 0.4), angs };
+}
+function updateFireworks(simMin) {
+  const zone = SAMPLE.fireworks, now = performance.now();
+  if (zone && playing && simMin >= FW_START_MIN && simMin < FW_END_MIN) {
+    if (now - fwLastSpawn > 90 + Math.random() * 160) { fwLastSpawn = now; fireworks.push(makeFirework(zone)); }
+  }
+  if (fireworks.length) fireworks = fireworks.filter(f => now - f.t < f.dur);
+}
+function drawFireworks() {
+  if (!fireworks.length) return;
+  const now = performance.now(), s = view.scale;
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";   // additive -> bright & glowy
+  fireworks.forEach(f => {
+    const p = Math.max(0, Math.min(1, (now - f.t) / f.dur)), X = tx(f.x), Y = ty(f.y);
+    if (f.type === "A") {                       // yellow-white burst that grows then shrinks
+      const a = Math.sin(p * Math.PI), r = Math.max(1, f.maxR * a * s);
+      const g = ctx.createRadialGradient(X, Y, 0, X, Y, r);
+      g.addColorStop(0, "rgba(255,255,235," + (0.9 * a).toFixed(3) + ")");
+      g.addColorStop(0.55, "rgba(255,244,170," + (0.45 * a).toFixed(3) + ")");
+      g.addColorStop(1, "rgba(255,238,150,0)");
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X, Y, r, 0, 7); ctx.fill();
+    } else {                                    // coloured core that grows then shoots out rays and fades
+      const core = Math.min(1, p / 0.22), rp = Math.max(0, (p - 0.12) / 0.88);
+      const len = f.rayLen * (1 - Math.pow(1 - rp, 2)) * s;   // ease-out reach
+      const r0 = 3 * s;
+      ctx.globalAlpha = p < 0.55 ? 1 : Math.max(0, 1 - (p - 0.55) / 0.45);
+      ctx.fillStyle = f.color;
+      ctx.beginPath(); ctx.arc(X, Y, Math.max(1, 3.5 * s * core * (1 - rp * 0.6)), 0, 7); ctx.fill();
+      ctx.strokeStyle = f.color; ctx.lineWidth = Math.max(1, 1.8 * s); ctx.lineCap = "round";
+      f.angs.forEach(ang => {
+        ctx.beginPath();
+        ctx.moveTo(X + Math.cos(ang) * r0, Y + Math.sin(ang) * r0);
+        ctx.lineTo(X + Math.cos(ang) * len, Y + Math.sin(ang) * len);
+        ctx.stroke();
+      });
+      ctx.globalAlpha = 1;
+    }
+  });
+  ctx.restore();
+}
+
 function simSpanMin() {
   if (!state.steps.length) return 0;
-  return state.steps[state.steps.length - 1].rideEnd - state.steps[0].walkStart;
+  const start = state.steps[0].walkStart;
+  let end = state.steps[state.steps.length - 1].rideEnd;
+  // an evening plan runs on through to the fireworks finale
+  if (SAMPLE.fireworks && end >= FW_START_MIN - 120 && end < FW_END_MIN) end = FW_END_MIN;
+  return end - start;
 }
 
 function play() {
@@ -2744,7 +2807,7 @@ function pause() {
   stopAudio();
 }
 function stop() {
-  playing = false; animClock = 0; activeStepIndex = -1;
+  playing = false; animClock = 0; activeStepIndex = -1; fireworks = [];
   if (animRAF) cancelAnimationFrame(animRAF);
   stopAudio();
   document.getElementById("playBtn").textContent = "▶ Play";
@@ -2787,10 +2850,13 @@ function frame(ts) {
   // no matter the chosen speed, blow through a long idle stretch quickly
   const ff = dwellFastForward(animClock);
   if (ff > speed) speed = ff;
+  const simMin = state.steps[0].walkStart + animClock;
+  if (SAMPLE.fireworks && simMin >= FW_START_MIN && simMin < FW_END_MIN) speed = Math.min(speed, 18 / FW_SHOW_SEC);   // slow the show to a watchable pace
   animClock += dtSec * speed;
 
   const span = simSpanMin();
-  if (animClock >= span) { animClock = span; renderAnimAt(animClock); stop(); return; }
+  if (animClock >= span) { animClock = span; updateFireworks(state.steps[0].walkStart + animClock); renderAnimAt(animClock); stop(); return; }
+  updateFireworks(state.steps[0].walkStart + animClock);
   renderAnimAt(animClock);
   if (playing) animRAF = requestAnimationFrame(frame);
 }
@@ -2832,6 +2898,11 @@ function dwellFastForward(clock) {
       if (watchableStop(s)) return 0;                                  // a spin/track/audio stop
       return s.ride > 0 ? s.ride / FF_MAX_SEC : 0;
     }
+  }
+  // past the last step but a fireworks finale is coming -> blow through the idle
+  if (SAMPLE.fireworks) {
+    const last = state.steps[state.steps.length - 1].rideEnd;
+    if (absT >= last && absT < FW_START_MIN) return (FW_START_MIN - last) / FF_MAX_SEC;
   }
   return 0;
 }
@@ -2980,7 +3051,8 @@ function renderAnimAt(clock) {
     const s = state.steps[state.steps.length - 1];
     const ex = state.nodes.get(s.exitNodeId);
     marker = { x: ex.x, y: ex.y, stroke: "#5fd38a", scale: persistentScaleBefore(state.steps.length) };
-    phase = "done"; info = "Day complete!";
+    phase = "done";
+    info = (SAMPLE.fireworks && absT >= FW_START_MIN && absT < FW_END_MIN) ? "🎆 Fireworks!" : "Day complete!";
   }
   activeStepIndex = stepI;
   if ((playing || sunScrubbing) && followCam && userZoom > 1 && marker) followAvatar(marker);
