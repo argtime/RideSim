@@ -1024,8 +1024,7 @@ function buildTransitStep(token, curNode, curTime, seqIndex) {
   };
 }
 
-function computeSequence() {
-  const startMin = hmToMin(document.getElementById("startTime").value || "09:00");
+function computeStepsFrom(startMin) {
   let curTime = startMin;
   let curNode = startNode();
   const steps = [];
@@ -1090,6 +1089,25 @@ function computeSequence() {
 
     curTime = rideEnd;
     curNode = exitId;
+  }
+  return steps;
+}
+// Forward mode: the time input is the start. Reverse mode: it's the finish time —
+// anchor the last ride's end at it and work back. Waits shift with the time of day,
+// so iterate the start (= finish - total) until it settles.
+function computeSequence() {
+  const t = hmToMin(document.getElementById("startTime").value || (reverseSchedule ? "22:00" : "09:00"));
+  let steps;
+  if (reverseSchedule) {
+    let start = t;
+    for (let i = 0; i < 6; i++) {
+      steps = computeStepsFrom(start);
+      const err = t - (steps.length ? steps[steps.length - 1].rideEnd : start);
+      if (Math.abs(err) < 0.25) break;
+      start += err;   // nudge the start so the finish lands on t
+    }
+  } else {
+    steps = computeStepsFrom(t);
   }
   state.steps = steps;
   return steps;
@@ -1165,6 +1183,7 @@ let hoverStep = null; // step index whose walk segment is hovered (shows dist/ti
 let selectedStep = null; // step index selected by tapping its sequence-list item
 // One live source — ThemeParks.wiki — powers both standby waits and Lightning Lane.
 let showLiveWaits = localStorage.getItem("ridesim.liveWaits") === "1"; // standby wait overlay
+let reverseSchedule = localStorage.getItem("ridesim.reverse") === "1"; // schedule backwards from a finish time
 let showLL = localStorage.getItem("ridesim.ll") === "1";               // Lightning Lane overlay
 let showHeat = localStorage.getItem("ridesim.heat") !== "0";           // sun/shade queue ring (on by default)
 let llPanelCollapsed = localStorage.getItem("ridesim.llCollapsed") === "1"; // LL list minimized to header
@@ -2729,15 +2748,17 @@ const FW_START_MIN = 22 * 60;                 // 10:00 pm
 const FW_END_MIN = FW_START_MIN + 18;         // an 18-minute show -> 10:18 pm
 const FW_SHOW_SEC = 22;                        // real-time the 18 sim-minutes play over (watchable)
 const FW_COLORS = ["#ff3b3b", "#ff8a1f", "#ffe234", "#4fe05a", "#c264ff"];  // red, orange, yellow, green, purple
+function hexToRgb(h) { h = h.replace("#", ""); return parseInt(h.slice(0, 2), 16) + "," + parseInt(h.slice(2, 4), 16) + "," + parseInt(h.slice(4, 6), 16); }
 let fireworks = [], fwLastSpawn = 0;
 function makeFirework(zone) {
   const ang = Math.random() * Math.PI * 2, dist = Math.sqrt(Math.random()) * zone.r;   // uniform over the disc
   const x = zone.x + Math.cos(ang) * dist, y = zone.y + Math.sin(ang) * dist;
-  if (Math.random() < 0.5) return { type: "A", x, y, t: performance.now(), dur: 1000, maxR: Math.max(14, zone.r * 0.22) };
+  const color = FW_COLORS[(Math.random() * FW_COLORS.length) | 0], rgb = hexToRgb(color);
+  if (Math.random() < 0.5) return { type: "A", x, y, t: performance.now(), dur: 1000, maxR: Math.max(14, zone.r * 0.22), color, rgb };
   const rays = 15 + Math.floor(Math.random() * 6);   // 15-20 lines
   const jitter = Math.random() * Math.PI * 2;
   const angs = Array.from({ length: rays }, (_, i) => jitter + (i / rays) * Math.PI * 2 + (Math.random() - 0.5) * 0.25);
-  return { type: "B", x, y, t: performance.now(), dur: 1400, color: FW_COLORS[(Math.random() * FW_COLORS.length) | 0], rayLen: Math.max(22, zone.r * 0.4), angs };
+  return { type: "B", x, y, t: performance.now(), dur: 1400, color, rgb, rayLen: Math.max(22, zone.r * 0.4), angs };
 }
 function updateFireworks(simMin) {
   const zone = SAMPLE.fireworks, now = performance.now();
@@ -2753,12 +2774,12 @@ function drawFireworks() {
   ctx.globalCompositeOperation = "lighter";   // additive -> bright & glowy
   fireworks.forEach(f => {
     const p = Math.max(0, Math.min(1, (now - f.t) / f.dur)), X = tx(f.x), Y = ty(f.y);
-    if (f.type === "A") {                       // yellow-white burst that grows then shrinks
+    if (f.type === "A") {                       // burst that grows then shrinks: white-hot core -> its colour
       const a = Math.sin(p * Math.PI), r = Math.max(1, f.maxR * a * s);
       const g = ctx.createRadialGradient(X, Y, 0, X, Y, r);
-      g.addColorStop(0, "rgba(255,255,235," + (0.9 * a).toFixed(3) + ")");
-      g.addColorStop(0.55, "rgba(255,244,170," + (0.45 * a).toFixed(3) + ")");
-      g.addColorStop(1, "rgba(255,238,150,0)");
+      g.addColorStop(0, "rgba(255,255,245," + (0.95 * a).toFixed(3) + ")");
+      g.addColorStop(0.45, "rgba(" + f.rgb + "," + (0.6 * a).toFixed(3) + ")");
+      g.addColorStop(1, "rgba(" + f.rgb + ",0)");
       ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X, Y, r, 0, 7); ctx.fill();
     } else {                                    // coloured core that grows then shoots out rays and fades
       const core = Math.min(1, p / 0.22), rp = Math.max(0, (p - 0.12) / 0.88);
@@ -3559,6 +3580,17 @@ function setPanelHidden(side, hidden, resize) {
   if (btn) btn.onclick = () => { panTouched = true; setPanelHidden(side, !document.body.classList.contains("hide-" + side), true); syncPlanUrl(); };
 });
 document.getElementById("clearSeq").onclick = () => { state.sequence = []; stop(); refresh(); };
+// Reverse toggle: schedule backwards from a finish time; relabel the time box.
+function setReverseUI() {
+  const b = document.getElementById("reverseBtn"); if (b) b.classList.toggle("active", reverseSchedule);
+  const lbl = document.getElementById("startLbl"); if (lbl) lbl.textContent = reverseSchedule ? "Finish" : "Start";
+}
+document.getElementById("reverseBtn").onclick = () => {
+  reverseSchedule = !reverseSchedule;
+  localStorage.setItem("ridesim.reverse", reverseSchedule ? "1" : "0");
+  setReverseUI(); stop(); refresh();
+};
+setReverseUI();
 // "Paste" opens the data modal focused on the Plan tab (a copy/paste surface).
 document.getElementById("pasteBtn").onclick = pastePlanFromClipboard;
 // Open the data modal focused on the Plan tab (manual copy/paste surface).

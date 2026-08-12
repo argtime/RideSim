@@ -11,7 +11,7 @@
   <h1 id="parkTitle"><span>Ride Sequence Planner</span></h1>
   <input id="planTitle" class="plan-title" placeholder="Name this plan…" title="Name this itinerary (shared in the link)">
   <div class="controls">
-    <label class="ctl">Start <input type="time" id="startTime" value="09:00">
+    <label class="ctl"><span id="startLbl">Start</span> <input type="time" id="startTime" value="09:00">
       <button id="nowBtn" title="Set start to the current time">Now</button></label>
     <label class="ctl">From <select id="startLoc" title="Where you are right now — the day starts here"></select></label>
     <button id="geoBtn" style="display:none" title="Show your GPS location and start from the nearest node">📍 Me</button>
@@ -91,6 +91,7 @@
     <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
       <span>Your Sequence</span>
       <span style="display:flex;gap:6px">
+        <button id="reverseBtn" style="padding:3px 9px;font-size:11px" title="Schedule backwards from a finish time — the time box becomes your finish time">⇄ Reverse</button>
         <button id="pasteBtn" style="padding:3px 9px;font-size:11px" title="Load a plan from a pasted ride-name list">📋 Paste</button>
         <button id="clearSeq" class="danger" style="padding:3px 9px;font-size:11px">Clear</button>
       </span>
