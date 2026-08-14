@@ -3841,23 +3841,22 @@ function overLabel(ev) {
 let vpStart = null, vpPanning = false, vpClickSuppressed = false;
 let touchActive = false;                 // a touch gesture owns the canvas — ignore emulated mouse
 // ---- Pan momentum: after a flick, keep panning and decelerate to a stop --------
-let panVelX = 0, panVelY = 0, panLastX = 0, panLastY = 0, panLastT = 0, momentumRAF = null;
-function panVelReset() { panVelX = 0; panVelY = 0; panLastT = 0; }
-function panVelTrack(cx, cy) {           // EMA of pointer velocity in px/ms, favouring recent samples
+let panVelX = 0, panVelY = 0, panHist = [], momentumRAF = null;
+function panVelReset() { panVelX = 0; panVelY = 0; panHist = []; }
+function panVelTrack(cx, cy) {           // keep recent points; release velocity is measured over a window
   const t = performance.now();
-  if (panLastT) {
-    const dt = t - panLastT;
-    if (dt > 0) {
-      panVelX = panVelX * 0.4 + ((cx - panLastX) / dt) * 0.6;
-      panVelY = panVelY * 0.4 + ((cy - panLastY) / dt) * 0.6;
-    }
-  }
-  panLastX = cx; panLastY = cy; panLastT = t;
+  panHist.push({ t, x: cx, y: cy });
+  while (panHist.length > 2 && t - panHist[0].t > 120) panHist.shift();
 }
 function cancelMomentum() { if (momentumRAF) { cancelAnimationFrame(momentumRAF); momentumRAF = null; } }
 function startMomentum() {
-  if (!panLastT || performance.now() - panLastT > 60) return;   // paused before release -> no flick
-  if (Math.hypot(panVelX, panVelY) < 0.06) return;              // too slow (px/ms)
+  const n = panHist.length;
+  if (n < 2) return;
+  const a = panHist[0], b = panHist[n - 1], span = b.t - a.t;
+  if (span <= 0 || performance.now() - b.t > 130) return;   // held still before lifting -> no flick
+  // average velocity over the last ~120ms: robust to the finger easing off just before release
+  panVelX = (b.x - a.x) / span; panVelY = (b.y - a.y) / span;
+  if (Math.hypot(panVelX, panVelY) < 0.035) return;         // gentle flicks fling too (px/ms)
   cancelMomentum();
   let last = performance.now();
   const step = () => {
@@ -3898,9 +3897,11 @@ let tapDown = null, lastTapT = 0, lastTapX = 0, lastTapY = 0;
 const ZOOM_STEP = 2;   // zoom factor per double-tap / two-finger-tap
 // true if a point (client px) is over bare map — not an attraction or its open label,
 // so a double-tap there is a zoom and never hijacks the tap-an-icon / tap-label-to-add flow.
-function tapOnEmpty(cx, cy) {
-  const ev = { clientX: cx, clientY: cy };
-  return !attractionAt(ev) && !(labelHit && overLabel(ev));
+// A double-tap zooms anywhere EXCEPT on an open attraction label (so it never
+// hijacks tap-the-label-to-add). Tapping an icon is fine — it zooms toward it —
+// which matters on a dense map where empty spots are scarce on a phone screen.
+function tapZoomOk(cx, cy) {
+  return !(labelHit && overLabel({ clientX: cx, clientY: cy }));
 }
 canvas.addEventListener("touchstart", (e) => {
   vpClickSuppressed = false;             // fresh gesture; a lingering flag must not eat this tap
@@ -3969,14 +3970,14 @@ canvas.addEventListener("touchend", (e) => {
   if (e.touches.length === 0) {
     if (wasPan) startMomentum();                  // fling on release
     // Double-tap on empty map -> zoom in (centred on the tap).
-    if (!twoFingerTap && tapDown && !tapDown.moved && !wasPan && (performance.now() - tapDown.t) < 300) {
+    if (!twoFingerTap && tapDown && !tapDown.moved && !wasPan && (performance.now() - tapDown.t) < 350) {
       const now = performance.now(), rect = canvas.getBoundingClientRect();
-      const onEmpty = tapOnEmpty(tapDown.x, tapDown.y);
-      if (onEmpty && lastTapT && (now - lastTapT) < 300 && Math.hypot(tapDown.x - lastTapX, tapDown.y - lastTapY) < 30) {
+      const zoomOk = tapZoomOk(tapDown.x, tapDown.y);
+      if (zoomOk && lastTapT && (now - lastTapT) < 350 && Math.hypot(tapDown.x - lastTapX, tapDown.y - lastTapY) < 45) {
         zoomAt(tapDown.x - rect.left, tapDown.y - rect.top, ZOOM_STEP); draw();
         vpClickSuppressed = true; lastTapT = 0;
-      } else {                                    // remember as a possible first tap (empty taps only)
-        lastTapT = onEmpty ? now : 0; lastTapX = tapDown.x; lastTapY = tapDown.y;
+      } else {                                    // remember as a possible first tap of a double-tap
+        lastTapT = zoomOk ? now : 0; lastTapX = tapDown.x; lastTapY = tapDown.y;
       }
     }
     pinch = null; touchPan = null; tapDown = null;
